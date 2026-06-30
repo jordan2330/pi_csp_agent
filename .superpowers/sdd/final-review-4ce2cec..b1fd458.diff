@@ -1,0 +1,695 @@
+﻿b1fd458 feat: lead-scan prompt template for scenario-based lead discovery
+365380b feat: SKILL.md files for browser_executor and nitrosamine scenario + CSP recommendations
+85a6988 feat: browser_executor skill with Playwright script mode
+0cd6121 feat: Pi configuration with Qwen provider and project instructions
+6c2dcb0 fix: correct NODE_PATH to /usr/local/lib/node_modules for global module resolution
+ .pi/settings.json                                  |   4 +
+ AGENTS.md                                          |  31 ++-
+ Dockerfile                                         |   2 +-
+ config/models.json                                 |  32 +++
+ docker-compose.yml                                 |   1 +
+ prompts/lead-scan.md                               |  16 ++
+ scenarios/nitrosamine/SKILL.md                     | 267 +++++++++++++++++++++
+ .../nitrosamine/references/csp-recommendations.md  |  37 +++
+ skills/browser_executor/SKILL.md                   |  73 ++++++
+ skills/browser_executor/scripts/browser.js         | 171 +++++++++++++
+ skills/browser_executor/scripts/package.json       |   8 +
+ 11 files changed, 628 insertions(+), 14 deletions(-)
+
+
+diff --git a/.pi/settings.json b/.pi/settings.json
+new file mode 100644
+index 0000000..44d747f
+--- /dev/null
++++ b/.pi/settings.json
+@@ -0,0 +1,4 @@
++{
++  "skills": ["skills/", "scenarios/"],
++  "prompts": ["prompts/"]
++}
+diff --git a/AGENTS.md b/AGENTS.md
+index 3162d72..4020f18 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -1,22 +1,27 @@
+ # AGENTS.md
+ 
+-## Repository nature
++## Project Overview
+ 
+-This is a **documentation-only knowledge base**, not a software project. There is no source code, no build system, no test suite, no linter, no package manager, and **no git repository initialized**. Do not look for or suggest running `build`/`test`/`lint`/`typecheck` commands, and do not propose git workflows (commit, branch, PR) unless the user first initializes git.
++This is a Pi Coding Agent project for CSP (Aptar active packaging) sales lead discovery. The agent scrapes regulatory and clinical trial data, matches customer profiles, and generates Markdown lead reports.
+ 
+-## Content domain & language
++## LLM Configuration
+ 
+-All content is written in **Simplified Chinese** and covers pharmaceutical packaging and drug-impurity topics:
++- Provider: Qwen (閫氫箟鍗冮棶) via DashScope OpenAI-compatible API
++- Models: `qwen-max` for complex reasoning (report generation), `qwen-plus` for routine tasks
++- Config: `config/models.json` 鈫?mounted to `/root/.pi/agent/models.json` in Docker
++- API key: `DASHSCOPE_API_KEY` environment variable
+ 
+-- `CSP.md` 鈥?Comparative analysis of Aptar CSP active packaging technologies (Activ-Vial庐, Activ-Film庐, Activ-Blister庐, 3-Phase Activ-Polymer鈩? Activ-Sachet庐, custom adsorbents). Contains performance data tables, regulatory status, cost/scalability notes, case studies, and a numbered source list with external URLs.
+-- `20260616_6鏈堜笂鏂颁簹纭濊兒鑽墿鍒嗘瀽鏉傝川.md` 鈥?USP Pharmaceutical Analytical Impurities (PAI) nitrosamine series update. Lists newly released nitrosamine impurities (Chinese/English name, USP catalog number, CAS) and a roster of ~100 affected active pharmaceutical ingredients.
++## Project Structure
+ 
+-When editing, preserve the bilingual (Chinese name + English name) conventions and the existing table structures, since they mirror USP/Aptar reference formats.
++- `skills/browser_executor/` 鈥?Generic Playwright browser automation tool (shared across all scenarios)
++- `scenarios/` 鈥?Business scenario skills (nitrosamine, probiotics, IVD, etc.)
++- `prompts/` 鈥?Pi prompt templates (entry points like `/lead-scan`)
++- `config/` 鈥?Cached data and model configuration
++- `output/` 鈥?Generated reports and run snapshots
+ 
+-## File naming convention
++## Key Conventions
+ 
+-Time-sensitive update notes use a `YYYYMMDD_` date prefix (e.g. `20260616_...`). Topical reference documents (e.g. `CSP.md`) use a short uppercase mnemonic with no date. Follow this convention when adding new files: date-prefixed for periodic updates, plain mnemonic for standing reference material.
+-
+-## Citations & sources
+-
+-`CSP.md` ends with a numbered `[n]` source list of external URLs, and inline references use the same `[n]` markers. When adding claims that rely on external data, append a new numbered source entry and cite it inline; do not leave bare `銆?..銆慲 placeholders (a few exist in the current file and should be replaced with real sources when available).
++- All SKILL.md and prompt instructions are written in Simplified Chinese
++- browser.js uses "script mode" (JSON step file) for multi-step browser interactions 鈥?each invocation is a separate process, so page state cannot persist across calls
++- Incremental detection: each run saves a snapshot to `output/runs/YYYY-MM-DD.json`; next run compares to find new leads
++- FDA data is auto-refreshed each run (page updated quarterly by FDA)
+diff --git a/Dockerfile b/Dockerfile
+index 9899644..511e79f 100644
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -6,11 +6,11 @@ RUN apt-get update \
+        chromium fonts-wqy-zenhei \
+   && rm -rf /var/lib/apt/lists/*
+ 
+ ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=true
+ ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
+-ENV NODE_PATH=/usr/lib/node_modules
++ENV NODE_PATH=/usr/local/lib/node_modules
+ 
+ RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+ RUN npm install -g playwright
+ 
+ WORKDIR /workspace
+diff --git a/config/models.json b/config/models.json
+new file mode 100644
+index 0000000..6c1ea85
+--- /dev/null
++++ b/config/models.json
+@@ -0,0 +1,32 @@
++{
++  "providers": {
++    "qwen": {
++      "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
++      "api": "openai-completions",
++      "apiKey": "$DASHSCOPE_API_KEY",
++      "compat": {
++        "thinkingFormat": "qwen"
++      },
++      "models": [
++        {
++          "id": "qwen-max",
++          "name": "Qwen Max",
++          "reasoning": false,
++          "input": ["text"],
++          "contextWindow": 32768,
++          "maxTokens": 8192,
++          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
++        },
++        {
++          "id": "qwen-plus",
++          "name": "Qwen Plus",
++          "reasoning": false,
++          "input": ["text"],
++          "contextWindow": 131072,
++          "maxTokens": 8192,
++          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
++        }
++      ]
++    }
++  }
++}
+diff --git a/docker-compose.yml b/docker-compose.yml
+index 50fb584..f589774 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -4,10 +4,11 @@ services:
+     environment:
+       - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY}
+     volumes:
+       - .:/workspace
+       - pi-agent-home:/root/.pi/agent
++      - ./config/models.json:/root/.pi/agent/models.json:ro
+     stdin_open: true
+     tty: true
+ 
+ volumes:
+   pi-agent-home:
+diff --git a/prompts/lead-scan.md b/prompts/lead-scan.md
+new file mode 100644
+index 0000000..bac831d
+--- /dev/null
++++ b/prompts/lead-scan.md
+@@ -0,0 +1,16 @@
++---
++description: 鎵цCSP鍟嗘満鍙戞帢鎵弿
++argument-hint: "<scenario>"
++---
++鎵ц $1 鍦烘櫙鐨勫晢鏈哄彂鎺樻壂鎻忋€?+
++1. 浣跨敤 /skill:$1 鍔犺浇鍦烘櫙 skill锛屾寜鍏?SKILL.md 鎸囦护鎵ц瀹屾暣 pipeline
++2. 棣栧厛纭繚 browser-executor skill 宸插氨缁紙濡傛湭鍔犺浇鍒欏厛 /skill:browser-executor锛?+3. 鎸夊満鏅?SKILL.md 鐨勪笁涓樁娈典緷娆℃墽琛岋細
++   - Phase 1: FDA 鏁版嵁閲囬泦涓庣紦瀛?+   - Phase 2: 涓浗涓村簥璇曢獙鎼滅储
++   - Phase 3: 鎶ュ憡鐢熸垚
++4. 濡傞亣鍒扮綉椤靛姞杞藉け璐ユ垨楠岃瘉鐮侊細
++   - 浜や簰妯″紡锛氭殏鍋滃苟鍚戠敤鎴疯鏄庢儏鍐碉紝绛夊緟鎸囩ず
++   - 鑷姩妯″紡锛坧i -p锛夛細鎴浘淇濆瓨锛岃褰曢敊璇紝缁х画涓嬩竴涓狝PI
++5. 瀹屾垚鍚庤緭鍑?output/CSP_Leads_Report.md 鐨勮矾寰勶紝骞剁畝瑕佹€荤粨鏂板鍟嗘満鏁伴噺
+diff --git a/scenarios/nitrosamine/SKILL.md b/scenarios/nitrosamine/SKILL.md
+new file mode 100644
+index 0000000..108e34d
+--- /dev/null
++++ b/scenarios/nitrosamine/SKILL.md
+@@ -0,0 +1,267 @@
++---
++name: nitrosamine
++description: 浜氱鑳鸿嵂鐗╁晢鏈哄彂鎺樺満鏅€備粠FDA椤甸潰鎶撳彇浜氱鑳烘潅璐ㄩ闄〢PI鍒楄〃锛屽湪涓浗鑽墿涓村簥璇曢獙鐧昏骞冲彴鎼滅储鐩稿叧涓村簥璇曢獙锛屽尮閰嶅鎴风敾鍍忓苟鐢熸垚CSP浜у搧鎺ㄨ崘鎶ュ憡銆傚綋闇€瑕佹墽琛屼簹纭濊兒鐩稿叧鐨勫晢鏈哄彂鎺樻椂浣跨敤姝?skill銆?+---
++
++# 浜氱鑳哄晢鏈哄彂鎺樺満鏅?+
++## 姒傝堪
++
++鏈満鏅墽琛屼笁闃舵 pipeline锛?+1. 浠?FDA 椤甸潰鎶撳彇浜氱鑳烘潅璐ㄥ拰瀵瑰簲 API 鍒楄〃
++2. 閫愪竴鍦ㄤ腑鍥借嵂鐗╀复搴婅瘯楠岀櫥璁板钩鍙版悳绱㈢浉鍏充复搴婅瘯楠?+3. 鐢熸垚鍖呭惈 CSP 浜у搧鎺ㄨ崘鐨?Markdown 鍟嗘満鎶ュ憡
++
++## 鍓嶇疆鏉′欢
++
++- 宸插姞杞?`browser-executor` skill
++- Docker 瀹瑰櫒宸插惎鍔紝Playwright/Chromium 鍙敤
++- `DASHSCOPE_API_KEY` 宸查厤缃?+
++---
++
++## Phase 1: FDA 鏁版嵁閲囬泦
++
++### 鐩爣
++
++浠?FDA 椤甸潰瑙ｆ瀽 Table 1锛屾彁鍙栨墍鏈変簹纭濊兒鏉傝川璁板綍鍙婂叾瀵瑰簲鐨?API銆?+
++### FDA 椤甸潰 URL
++
++```
++https://www.fda.gov/regulatory-information/search-fda-guidance-documents/cder-nitrosamine-impurity-acceptable-intake-limits#predicted
++```
++
++### 鎿嶄綔姝ラ
++
++1. 鍒涘缓涓€涓?browser script JSON 鏂囦欢锛堝 `/tmp/fda-scrape.json`锛夛紝鍐呭锛?+
++```json
++{
++  "steps": [
++    {
++      "action": "navigate",
++      "url": "https://www.fda.gov/regulatory-information/search-fda-guidance-documents/cder-nitrosamine-impurity-acceptable-intake-limits#predicted",
++      "timeout": 60000
++    },
++    {
++      "action": "wait",
++      "selector": "table",
++      "timeout": 60000
++    },
++    {
++      "action": "extract",
++      "selector": "table",
++      "format": "json"
++    }
++  ]
++}
++```
++
++2. 鎵ц鑴氭湰锛?+```bash
++node skills/browser_executor/scripts/browser.js script /tmp/fda-scrape.json
++```
++
++3. 瑙ｆ瀽杈撳嚭锛欶DA Table 1 鐨勬瘡涓€琛屽寘鍚?4 鍒楋細
++   - 绗?鍒楋細Nitrosamine Name锛堜簹纭濊兒鏉傝川鍚嶇О锛?+   - 绗?鍒楋細Source锛堝搴旂殑 API 鍚嶇О锛屽彲鑳芥湁澶氫釜鐢ㄥ垎鍙峰垎闅旓級
++   - 绗?鍒楋細Potency Category锛?-5锛?+   - 绗?鍒楋細Recommended AI Limit锛堝 "100 ng/day"锛?+
++4. 鍘婚噸 Source 鍒楀緱鍒板敮涓€ API 鍒楄〃銆傚浜庡惈澶氫釜 API 鐨勮锛堝垎鍙峰垎闅旓級锛屾媶鍒嗕负鍗曠嫭鐨?API銆?+
++5. 鏋勫缓缁撴瀯鍖栨暟鎹苟鍐欏叆 `config/fda_nitrosamines.json`锛?+
++```json
++{
++  "last_updated": "2026-06-30",
++  "fda_page_version": "2026-03-19",
++  "nitrosamines": [
++    {
++      "nitrosamine_name": "N-nitroso-atenolol",
++      "source_api": "Atenolol",
++      "potency_category": 4,
++      "ai_limit": "1500 ng/day"
++    }
++  ],
++  "unique_apis": ["Atenolol", "Metoprolol", ...]
++}
++```
++
++### 閿欒澶勭悊
++
++- 濡傛灉 FDA 椤甸潰鏃犳硶璁块棶锛岄噸璇?3 娆?+- 浠嶅け璐ュ垯浣跨敤 `config/fda_nitrosamines.json` 涓殑缂撳瓨鏁版嵁锛屽苟鍦ㄦ姤鍛婁腑娉ㄦ槑浣跨敤浜嗙紦瀛?+
++---
++
++## Phase 2: 涓浗涓村簥璇曢獙鎼滅储
++
++### 鐩爣
++
++瀵规瘡涓?API 鍦?chinadrugtrials.org.cn 鎼滅储鐩稿叧涓村簥璇曢獙锛屾彁鍙栫敵璇蜂汉淇℃伅銆?+
++### 鎼滅储绛栫暐
++
++瀵?`fda_nitrosamines.json` 涓殑姣忎釜 API锛?+1. 鐢ㄨ嫳鏂囧悕鎼滅储锛堥儴鍒嗗钩鍙版敮鎸佽嫳鏂囨悳绱級
++2. 濡傛灉鑻辨枃鎼滅储鏃犵粨鏋滐紝鐢ㄤ腑鏂囧悕鎼滅储锛堜綘闇€瑕佹牴鎹嫳鏂囧悕鎺ㄦ柇涓枃鍚嶏級
++3. 濡傛灉閮芥棤缁撴灉锛岃烦杩囪 API 骞惰褰?+
++### chinadrugtrials 鎼滅储娴佺▼
++
++鎼滅储椤甸潰 URL锛歚https://www.chinadrugtrials.org.cn/clinicaltrials.searchlist.dhtml`
++
++1. 鍒涘缓 browser script JSON 鏂囦欢锛堝 `/tmp/trial-search.json`锛夛細
++
++```json
++{
++  "steps": [
++    {
++      "action": "navigate",
++      "url": "https://www.chinadrugtrials.org.cn/clinicaltrials.searchlist.dhtml",
++      "timeout": 60000
++    },
++    {
++      "action": "wait",
++      "selector": "input[name='keywords']",
++      "timeout": 30000
++    },
++    {
++      "action": "type",
++      "selector": "input[name='keywords']",
++      "text": "API_NAME_HERE"
++    },
++    {
++      "action": "click",
++      "selector": "input[type='submit'], button[type='submit'], .search-btn"
++    },
++    {
++      "action": "wait",
++      "selector": ".list, .result, table",
++      "timeout": 30000
++    },
++    {
++      "action": "extract",
++      "selector": ".list, .result, table",
++      "format": "json"
++    }
++  ]
++}
++```
++
++2. **閲嶈**锛氫綘闇€瑕佸厛璁块棶涓€娆℃悳绱㈤〉闈紝鎴浘鍒嗘瀽瀹為檯鐨?HTML 缁撴瀯锛岀劧鍚庤皟鏁翠笂杩伴€夋嫨鍣ㄣ€傞€夋嫨鍣ㄥ彲鑳藉洜缃戠珯鏇存柊鑰屽彉鍖栥€?+
++3. 瀵规瘡涓?API 鎵ц鎼滅储鑴氭湰锛屾彁鍙栦互涓嬪瓧娈碉細
++   - 鐢宠浜?鐢冲姙鑰?+   - 璇曢獙鍚嶇О/鑽墿鍚嶇О
++   - 璇曢獙鐘舵€侊紙濡傦細杩涜涓€佸凡瀹屾垚銆佸凡鎷涘嫙锛?+   - 閫傚簲鐥?+   - 璇曢獙鍒嗘湡锛圛鏈熴€両I鏈熴€両II鏈熴€両V鏈燂級
++   - 涓昏鐮旂┒鑰?+   - 璇曢獙鏈烘瀯
++   - 鐧昏鏃ユ湡
++
++4. 濡傛灉鎼滅储缁撴灉鏈夊椤碉紝闇€瑕佺炕椤垫彁鍙栵紙鍒涘缓鍖呭惈澶氭鐐瑰嚮"涓嬩竴椤?鍜屾彁鍙栫殑鑴氭湰锛?+
++### 鎻愬彇缁撴灉鏍煎紡
++
++灏嗘瘡涓?API 鐨勬悳绱㈢粨鏋滃悎骞朵负锛?+
++```json
++{
++  "api_name": "Atenolol",
++  "api_name_cn": "闃挎浛娲涘皵",
++  "potency_category": 4,
++  "ai_limit": "1500 ng/day",
++  "trials": [
++    {
++      "sponsor": "XX鍒惰嵂鏈夐檺鍏徃",
++      "drug_name": "闃挎浛娲涘皵鐗?,
++      "status": "杩涜涓?,
++      "indication": "楂樿鍘?,
++      "phase": "III鏈?,
++      "investigator": "寮犳煇鏌?,
++      "site": "鍖椾含XX鍖婚櫌",
++      "registration_date": "2025-03-15"
++    }
++  ]
++}
++```
++
++### 澧為噺妫€娴?+
++1. 璇诲彇 `output/runs/` 鐩綍涓嬫渶杩戜竴娆＄殑蹇収鏂囦欢锛堝 `output/runs/2026-06-23.json`锛?+2. 瀵规瘮鏈缁撴灉涓庝笂娆″揩鐓э細
++   - 鏂板 API锛欶DA 鏂板垪鍏ヤ絾涓婃蹇収涓病鏈夌殑
++   - 鏂板涓村簥璇曢獙锛氭湰娆℃悳绱㈠埌浣嗕笂娆″揩鐓т腑娌℃湁鐨勶紙鎸夌敵璇蜂汉+鐧昏鏃ユ湡鍘婚噸锛?+   - 鐘舵€佸彉鍖栵細璇曢獙鐘舵€佷粠"杩涜涓?鍙樹负"宸插畬鎴?绛?+3. 鏍囪鎵€鏈夋柊澧為」
++
++### 閿欒澶勭悊
++
++- 鍗曚釜 API 鎼滅储瓒呮椂锛氳烦杩囷紝璁板綍鍒?`output/runs/errors.log`锛岀户缁笅涓€涓?+- 楠岃瘉鐮佸嚭鐜帮細鎴浘淇濆瓨鍒?`/tmp/captcha-<api>-<timestamp>.png`锛岃烦杩囪 API
++- 鎼滅储缁撴灉涓虹┖锛氭甯告儏鍐碉紝璇?API 鏃犵浉鍏充复搴婅瘯楠?+
++---
++
++## Phase 3: 鎶ュ憡鐢熸垚
++
++### 鐩爣
++
++鏍规嵁 Phase 1-2 鐨勬暟鎹紝鍙傝€?CSP 鎺ㄨ崘瑙勫垯锛岀敓鎴?Markdown 鍟嗘満鎶ュ憡銆?+
++### 鎿嶄綔姝ラ
++
++1. 璇诲彇 `references/csp-recommendations.md` 涓殑鎺ㄨ崘瑙勫垯
++
++2. 瀵规瘡鏉′复搴婅瘯楠岃褰曪細
++   - 鏍规嵁 API 鐨?potency category 鏌ヨ〃寰楀埌鎺ㄨ崘 CSP 鏂规
++   - 鏍规嵁璇曢獙鍒嗘湡浼扮畻鍖呰闇€姹傜骇鍒?+   - 鏍规嵁鍓傚瀷璋冩暣鎺ㄨ崘锛堝鏈夛級
++
++3. 鐢熸垚 `output/CSP_Leads_Report.md`锛屾牸寮忓涓嬶細
++
++```markdown
++# CSP 鍟嗘満鍙戞帢鎶ュ憡 鈥?浜氱鑳?+> 鐢熸垚鏃ユ湡: YYYY-MM-DD | 鏁版嵁鏉ユ簮: FDA (鐗堟湰鏃ユ湡) + 涓浗鑽墿涓村簥璇曢獙鐧昏涓庝俊鎭叕绀哄钩鍙?+> 鏈鏂板: N 鏉?| 鎬昏: M 鏉?+
++## 姒傝
++- FDA浜氱鑳洪闄〢PI: X涓?鈫?涓浗鏈変复搴婅瘯楠? Y涓?+- 鏂板锛堟湰娆★級: N涓?+- 鏋侀珮椋庨櫓(Cat 1): A涓?| 楂橀闄?Cat 2): B涓?| 涓珮椋庨櫓(Cat 3): C涓?| 涓闄?Cat 4): D涓?| 浣庨闄?Cat 5): E涓?+
++## 鏂板鍟嗘満锛堟湰娆★級
++### <API涓枃鍚? <API鑻辨枃鍚? 鈥?K瀹朵紒涓?+| 鐢宠浜?| 璇曢獙鐘舵€?| 閫傚簲鐥?| 璇曢獙鍒嗘湡 | 鐧昏鏃ユ湡 | FDA椋庨櫓绛夌骇 | 鎺ㄨ崘CSP鏂规 |
++|--------|---------|--------|---------|---------|------------|------------|
++| ...    | ...      | ...    | ...     | ...     | Cat N      | ...        |
++
++## 鍏ㄩ噺鍟嗘満鍒楄〃
++### 鏋侀珮椋庨櫓 (Cat 1)
++锛堣〃鏍煎悓涓婏級
++
++### 楂橀闄?(Cat 2)
++...
++
++### 涓珮椋庨櫓 (Cat 3)
++...
++
++### 涓闄?(Cat 4)
++...
++
++### 浣庨闄?(Cat 5)
++...
++```
++
++4. 淇濆瓨鏈杩愯蹇収鍒?`output/runs/YYYY-MM-DD.json`锛堝畬鏁存暟鎹紝鐢ㄤ簬涓嬫澧為噺瀵规瘮锛?+
++### 鎶ュ憡瑕佹眰
++
++- 鎸夐闄╃瓑绾т粠楂樺埌浣庢帓鍒?+- 鏂板鍟嗘満鍦ㄦ渶鍓嶉潰鍗曠嫭鍒楀嚭
++- 姣忎釜API涓嬬殑浼佷笟鎸夎瘯楠屽垎鏈熶粠楂樺埌浣庢帓鍒楋紙III鏈?> II鏈?> I鏈燂級
++- 濡傛灉鏌怉PI鏃犱腑鍥戒复搴婅瘯楠岋紝涓嶅湪鎶ュ憡涓垪鍑?diff --git a/scenarios/nitrosamine/references/csp-recommendations.md b/scenarios/nitrosamine/references/csp-recommendations.md
+new file mode 100644
+index 0000000..8b7fd24
+--- /dev/null
++++ b/scenarios/nitrosamine/references/csp-recommendations.md
+@@ -0,0 +1,37 @@
++# CSP 浜у搧鎺ㄨ崘瑙勫垯 鈥?鎸変簹纭濊兒椋庨櫓绛夌骇
++
++## 鎺ㄨ崘鐭╅樀
++
++| FDA Potency Category | AI Limit (ng/day) | 椋庨櫓绛夌骇 | 鎺ㄨ崘 CSP 鏂规 | 鐞嗙敱 |
++|---------------------|-------------------|---------|-------------|------|
++| Cat 1 | 26.5 | 鏋侀珮 | Activ-Blister庐 | 鍗曟牸鐙珛寰皵鍊欐帶鍒讹紝FDA宸叉壒鍑嗙敤浜庨珮椋庨櫓鍙ｆ湇鍥轰綋锛涙瘡鏍煎悓姝ユ帶鍒舵箍搴﹀拰姘ф皵锛岄檷瑙ｄ骇鐗╁闀跨巼闄嶄綆2-3鍊?|
++| Cat 2 | 100 | 楂?| Activ-Blister庐 | 鍚屼笂锛岄€傜敤浜庨珮鏁忔劅鍙ｆ湇鍥轰綋鐨勪簹纭濊兒椋庨櫓鎺у埗 |
++| Cat 3 | 400 | 涓珮 | 3-Phase Activ-Polymer鈩?| 鍙屽姛鑳芥椿鎬у眰锛堥櫎婀?闄ゆ哀锛夛紝鍏煎鐜版湁娉ㄥ/鎸ゅ嚭宸ヨ壓锛涘彲宓屽叆娉＄僵鎴栫摱浣?|
++| Cat 4 | 1500 | 涓?| 3-Phase Activ-Polymer鈩?鎴?Activ-Vial庐 | 鎸夊寘瑁呭舰鎬侀€夋嫨锛氭场缃┾啋3-Phase锛岀摱瑁呪啋Activ-Vial庐 |
++| Cat 5 | 1500 | 浣?| Activ-Vial庐 / Activ-Film庐 | 鐡惰閫?Activ-Vial庐锛堢渷鍘讳簩娆¤閰嶏紝闄嶄綆鍖呰浣撶Н40-60%锛夛紱鏌旀€у寘瑁呴€?Activ-Film庐 |
++
++## 闄勫姞鎺ㄨ崘閫昏緫
++
++### 鎸夎嵂鍝佸墏鍨?+
++| 鍓傚瀷 | 鎺ㄨ崘鏂规 | 璇存槑 |
++|------|---------|------|
++| 鍙ｆ湇鍥轰綋锛堢墖鍓?鑳跺泭锛墊 鎸変笂琛?potency category 鎺ㄨ崘 | 涓昏鍦烘櫙 |
++| 閫忕毊璐村墏 | Activ-Film庐 | 钖勮啘褰㈠紡鎻愪緵婀垮害涓庢哀姘斿弻閲嶄繚鎶?|
++| 鐩婄敓鑿?| Activ-Vial庐 | 鐡剁洊鍐呭祵骞茬嚗鍓傝濂楋紝2骞碈FU涓嬮檷鐜?10% |
++| 璇婃柇璇曠焊 | Activ-Film庐 | 钖勮啘鍖呰锛屾鍚戠嚎淇濈暀鐜囨彁鍗?5% |
++| 鏁ｈ/澶у寘瑁?| Activ-Sachet庐 | 鐙珛灏忚鏀惧叆澶у寘瑁呭鍣?|
++
++### 鎸夎瘯楠屽垎鏈熶及绠楀寘瑁呴渶姹?+
++| 璇曢獙鍒嗘湡 | 棰勪及鏁伴噺 | 鍖呰闇€姹傜骇鍒?|
++|---------|---------|------------|
++| I鏈?| 20-100浜?| 灏忔壒閲?鈫?Activ-Sachet庐 鍗虫彃鍗崇敤 |
++| II鏈?| 100-500浜?| 涓壒閲?鈫?Activ-Vial庐 鎴?Activ-Blister庐 |
++| III鏈?| 500-5000浜?| 澶ф壒閲?鈫?Activ-Blister庐 鎴?3-Phase Activ-Polymer鈩?|
++| IV鏈?涓婂競鍚?| >5000浜?| 閲忎骇 鈫?鎸夊墏鍨嬫帹鑽愶紝浼樺厛宸茶幏FDA鎵瑰噯鐨?Activ-Blister庐 |
++
++## 鏁版嵁鏉ユ簮
++
++- CSP 鎶€鏈弬鏁板拰妗堜緥鏁版嵁鏉ヨ嚜 `CSP.md`锛堥」鐩牴鐩綍鐨?Aptar CSP 鎶€鏈姣旀枃妗ｏ級
++- FDA potency category 鍜?AI limit 鏉ヨ嚜 FDA 瀹樻柟椤甸潰 Table 1
+diff --git a/skills/browser_executor/SKILL.md b/skills/browser_executor/SKILL.md
+new file mode 100644
+index 0000000..a6fff73
+--- /dev/null
++++ b/skills/browser_executor/SKILL.md
+@@ -0,0 +1,73 @@
++---
++name: browser-executor
++description: 鐪熷疄娴忚鍣ㄨ嚜鍔ㄥ寲宸ュ叿銆備娇鐢?Playwright 鍦ㄧ湡瀹?Chromium 娴忚鍣ㄤ腑瀵艰埅銆佽緭鍏ャ€佺偣鍑汇€佺瓑寰呭拰鎻愬彇缃戦〉鏁版嵁銆傜敤浜庨渶瑕?JavaScript 娓叉煋鐨勭綉绔欙紙濡備腑鍥借嵂鐗╀复搴婅瘯楠岀櫥璁板钩鍙帮級銆傚綋闇€瑕佷笌缃戦〉杩涜浜や簰寮忔搷浣滄椂浣跨敤姝?skill銆?+---
++
++# Browser Executor
++
++閫氱敤娴忚鍣ㄨ嚜鍔ㄥ寲宸ュ叿锛屽熀浜?Playwright銆傜敤浜庡湪鐪熷疄娴忚鍣ㄤ腑鎵ц澶氭楠ょ綉椤垫搷浣溿€?+
++## 鏍稿績姒傚康
++
++姣忔璋冪敤 `browser.js` 鏄竴涓嫭绔嬭繘绋嬨€?*椤甸潰鐘舵€佹棤娉曡法璋冪敤淇濇寔**銆傚洜姝や娇鐢?**script 妯″紡**锛氬皢鎵€鏈夋搷浣滄楠ゅ啓鍏ヤ竴涓?JSON 鏂囦欢锛屼竴娆℃€ф墽琛屻€?+
++## 浣跨敤鏂规硶
++
++### Script 妯″紡锛堜富瑕佺敤娉曪級
++
++鍒涘缓涓€涓?JSON 鑴氭湰鏂囦欢鎻忚堪鎿嶄綔姝ラ锛岀劧鍚庢墽琛岋細
++
++```bash
++node scripts/browser.js script /path/to/script.json
++```
++
++### Screenshot 妯″紡锛堣皟璇曠敤锛?+
++```bash
++node scripts/browser.js screenshot <url> <output-path>
++```
++
++## Script JSON 鏍煎紡
++
++```json
++{
++  "steps": [
++    { "action": "navigate", "url": "https://example.com" },
++    { "action": "type", "selector": "#search-input", "text": "鎼滅储鍏抽敭璇? },
++    { "action": "click", "selector": "#search-button" },
++    { "action": "wait", "selector": ".search-results", "timeout": 30000 },
++    { "action": "extract", "selector": ".result-table", "format": "json" },
++    { "action": "extract", "selector": ".summary-text", "format": "text" },
++    { "action": "screenshot", "path": "/tmp/debug-step.png" }
++  ]
++}
++```
++
++## 鏀寔鐨?Action
++
++| Action | 鍙傛暟 | 璇存槑 |
++|--------|------|------|
++| `navigate` | `url`, `timeout`(鍙€? | 瀵艰埅鍒版寚瀹歎RL锛岀瓑寰卬etworkidle |
++| `type` | `selector`, `text`, `timeout`(鍙€? | 鍦ㄨ緭鍏ユ涓～鍏ユ枃鏈?|
++| `click` | `selector`, `timeout`(鍙€? | 鐐瑰嚮鍏冪礌 |
++| `wait` | `selector`, `timeout`(鍙€? | 绛夊緟鍏冪礌鍑虹幇锛岄粯璁よ秴鏃?0绉?|
++| `extract` | `selector`, `format`("json"鎴?text") | 鎻愬彇鏁版嵁銆俲son鏍煎紡浼氳В鏋愯〃鏍肩粨鏋?|
++| `screenshot` | `path`, `fullPage`(鍙€? | 鎴浘淇濆瓨鍒版寚瀹氳矾寰?|
++
++## 杈撳嚭
++
++鎵€鏈?`extract` 姝ラ鐨勭粨鏋滄寜椤哄簭缁勬垚 JSON 鏁扮粍杈撳嚭鍒?stdout銆?+
++- `format: "text"` 鈫?杩斿洖瀛楃涓?+- `format: "json"` 鈫?杩斿洖琛ㄦ牸鏁版嵁锛堜簩缁存暟缁勶級鎴栨枃鏈垪琛?+
++## 璺緞璇存槑
++
++- 鑴氭湰璺緞鐩稿浜?`/workspace`锛圖ocker 涓殑宸ヤ綔鐩綍锛?+- 鎴浘璺緞寤鸿浣跨敤 `/tmp/` 鐩綍
++- Cookie 鐘舵€佽嚜鍔ㄤ繚瀛樺湪 `/tmp/browser-state.json`锛岃法璋冪敤淇濇寔鐧诲綍鐘舵€?+
++## 閿欒澶勭悊
++
++- 浠讳綍姝ラ澶辫触锛屾暣涓剼鏈粓姝紝閿欒淇℃伅杈撳嚭鍒?stderr
++- 寤鸿 Pi 鍦ㄩ亣鍒伴敊璇椂鎴浘璋冭瘯锛岀劧鍚庤皟鏁撮€夋嫨鍣ㄩ噸璇?diff --git a/skills/browser_executor/scripts/browser.js b/skills/browser_executor/scripts/browser.js
+new file mode 100644
+index 0000000..e82860b
+--- /dev/null
++++ b/skills/browser_executor/scripts/browser.js
+@@ -0,0 +1,171 @@
++#!/usr/bin/env node
++
++const { chromium } = require('playwright');
++const fs = require('fs');
++const path = require('path');
++
++const STATE_FILE = '/tmp/browser-state.json';
++const DEFAULT_TIMEOUT = 30000;
++
++function usage() {
++  console.error(`Usage:
++  node browser.js script <path-to-json-script>    Execute multi-step browser script
++  node browser.js screenshot <url> <output-path>  Navigate to URL and save screenshot
++
++Script JSON format:
++  {
++    "steps": [
++      { "action": "navigate", "url": "https://..." },
++      { "action": "type", "selector": "#input", "text": "query" },
++      { "action": "click", "selector": "#button" },
++      { "action": "wait", "selector": ".results", "timeout": 30000 },
++      { "action": "extract", "selector": ".table", "format": "json" },
++      { "action": "extract", "selector": ".text", "format": "text" },
++      { "action": "screenshot", "path": "/tmp/debug.png" }
++    ]
++  }
++
++Output: JSON array of extraction results, in order of extract steps.
++        Each result is either a string (text) or parsed table data (json).`);
++  process.exit(1);
++}
++
++async function runScript(scriptPath) {
++  const script = JSON.parse(fs.readFileSync(scriptPath, 'utf8'));
++  const steps = script.steps || [];
++
++  const browser = await chromium.launch({
++    headless: true,
++    executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
++    args: ['--no-sandbox', '--disable-setuid-sandbox'],
++  });
++
++  const context = await browser.newContext({
++    locale: 'zh-CN',
++    viewport: { width: 1280, height: 720 },
++    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
++  });
++
++  // Restore cookies if state file exists
++  if (fs.existsSync(STATE_FILE)) {
++    try {
++      const state = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
++      if (state.cookies) await context.addCookies(state.cookies);
++    } catch (e) {
++      // Ignore corrupted state file
++    }
++  }
++
++  const page = await context.newPage();
++  const results = [];
++
++  try {
++    for (const step of steps) {
++      switch (step.action) {
++        case 'navigate':
++          await page.goto(step.url, { waitUntil: 'networkidle', timeout: step.timeout || DEFAULT_TIMEOUT });
++          break;
++
++        case 'type':
++          await page.fill(step.selector, step.text, { timeout: step.timeout || DEFAULT_TIMEOUT });
++          break;
++
++        case 'click':
++          await page.click(step.selector, { timeout: step.timeout || DEFAULT_TIMEOUT });
++          break;
++
++        case 'wait':
++          await page.waitForSelector(step.selector, { timeout: step.timeout || DEFAULT_TIMEOUT });
++          break;
++
++        case 'extract': {
++          const format = step.format || 'text';
++          if (format === 'json') {
++            const data = await page.evaluate((sel) => {
++              const el = document.querySelector(sel);
++              if (!el) return null;
++              const tables = el.querySelectorAll('table');
++              if (tables.length > 0) {
++                return Array.from(tables).map(table =>
++                  Array.from(table.querySelectorAll('tr')).map(row =>
++                    Array.from(row.querySelectorAll('td,th')).map(cell => cell.textContent.trim())
++                  )
++                );
++              }
++              // Return structured list items if no table
++              const items = el.querySelectorAll('li, tr, .item');
++              if (items.length > 0) {
++                return Array.from(items).map(item => item.textContent.trim());
++              }
++              return el.textContent.trim();
++            }, step.selector);
++            results.push(data);
++          } else {
++            const text = await page.textContent(step.selector, { timeout: step.timeout || DEFAULT_TIMEOUT });
++            results.push(text ? text.trim() : null);
++          }
++          break;
++        }
++
++        case 'screenshot':
++          await page.screenshot({ path: step.path, fullPage: step.fullPage || false });
++          results.push({ screenshot: step.path });
++          break;
++
++        default:
++          console.error(`Unknown action: ${step.action}`);
++          process.exit(1);
++      }
++    }
++
++    // Save cookies
++    const cookies = await context.cookies();
++    fs.writeFileSync(STATE_FILE, JSON.stringify({ cookies }));
++
++    // Output results as JSON
++    console.log(JSON.stringify(results, null, 2));
++
++  } catch (error) {
++    console.error(JSON.stringify({ error: error.message, stack: error.stack }));
++    process.exit(1);
++  } finally {
++    await browser.close();
++  }
++}
++
++async function runScreenshot(url, outputPath) {
++  const browser = await chromium.launch({
++    headless: true,
++    executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
++    args: ['--no-sandbox', '--disable-setuid-sandbox'],
++  });
++
++  const page = await browser.newPage({
++    locale: 'zh-CN',
++    viewport: { width: 1280, height: 720 },
++  });
++
++  try {
++    await page.goto(url, { waitUntil: 'networkidle', timeout: DEFAULT_TIMEOUT });
++    await page.screenshot({ path: outputPath, fullPage: true });
++    console.log(JSON.stringify({ success: true, path: outputPath }));
++  } catch (error) {
++    console.error(JSON.stringify({ error: error.message }));
++    process.exit(1);
++  } finally {
++    await browser.close();
++  }
++}
++
++// Main
++const [action, ...args] = process.argv.slice(2);
++
++if (action === 'script') {
++  if (!args[0]) usage();
++  runScript(args[0]);
++} else if (action === 'screenshot') {
++  if (!args[0] || !args[1]) usage();
++  runScreenshot(args[0], args[1]);
++} else {
++  usage();
++}
+diff --git a/skills/browser_executor/scripts/package.json b/skills/browser_executor/scripts/package.json
+new file mode 100644
+index 0000000..7f956ef
+--- /dev/null
++++ b/skills/browser_executor/scripts/package.json
+@@ -0,0 +1,8 @@
++{
++  "name": "browser-executor",
++  "version": "1.0.0",
++  "private": true,
++  "dependencies": {
++    "playwright": "^1.40.0"
++  }
++}
