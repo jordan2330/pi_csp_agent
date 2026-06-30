@@ -1,0 +1,13 @@
+services:
+  csp-agent:
+    build: .
+    environment:
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY}
+    volumes:
+      - .:/workspace
+      - pi-agent-home:/root/.pi/agent
+    stdin_open: true
+    tty: true
+
+volumes:
+  pi-agent-home:

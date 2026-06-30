@@ -1,0 +1,4 @@
+.env
+output/runs/
+node_modules/
+*.log
