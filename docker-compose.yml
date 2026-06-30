@@ -6,6 +6,7 @@ services:
     volumes:
       - .:/workspace
       - pi-agent-home:/root/.pi/agent
+      - ./config/models.json:/root/.pi/agent/models.json:ro
     stdin_open: true
     tty: true
 
