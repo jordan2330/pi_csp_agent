@@ -6,8 +6,8 @@ This is a Pi Coding Agent project for CSP (Aptar active packaging) sales lead di
 
 ## LLM Configuration
 
-- Provider: Aliyun Token Plan (百炼 token plan) via OpenAI-compatible API
-- Endpoint: `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`
+- Provider: Aliyun DashScope (百炼) via OpenAI-compatible API
+- Endpoint: `https://dashscope.aliyuncs.com/compatible-mode/v1`
 - Models: `qwen3.7-max` / `deepseek-v4-pro` / `glm-5.2` / `kimi-k2.6` for complex reasoning, `qwen3.7-plus` / `deepseek-v4-flash` for routine tasks
 - Config: `config/models.json` → mounted to `/root/.pi/agent/models.json` in Docker
 - API key: `DASHSCOPE_API_KEY` environment variable
