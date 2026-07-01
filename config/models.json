@@ -5,7 +5,11 @@
       "api": "openai-completions",
       "apiKey": "$DASHSCOPE_API_KEY",
       "compat": {
-        "thinkingFormat": "qwen"
+        "thinkingFormat": "qwen",
+        "supportsDeveloperRole": false,
+        "maxTokensField": "max_tokens",
+        "supportsReasoningEffort": false,
+        "supportsStrictMode": false
       },
       "models": [
         {
@@ -13,8 +17,8 @@
           "name": "Qwen 3.7 Max",
           "reasoning": true,
           "input": ["text"],
-          "contextWindow": 32768,
-          "maxTokens": 8192,
+          "contextWindow": 131072,
+          "maxTokens": 16384,
           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
         },
         {
@@ -23,7 +27,7 @@
           "reasoning": true,
           "input": ["text"],
           "contextWindow": 131072,
-          "maxTokens": 8192,
+          "maxTokens": 16384,
           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
         },
         {
@@ -32,7 +36,7 @@
           "reasoning": true,
           "input": ["text"],
           "contextWindow": 131072,
-          "maxTokens": 8192,
+          "maxTokens": 16384,
           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
         },
         {
@@ -50,7 +54,7 @@
           "reasoning": true,
           "input": ["text"],
           "contextWindow": 131072,
-          "maxTokens": 8192,
+          "maxTokens": 16384,
           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
         },
         {
@@ -59,7 +63,7 @@
           "reasoning": true,
           "input": ["text"],
           "contextWindow": 262144,
-          "maxTokens": 8192,
+          "maxTokens": 16384,
           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
         }
       ]
