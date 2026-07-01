@@ -1,4 +1,5 @@
 .env
 output/runs/
 node_modules/
+scripts/
 *.log

@@ -276,11 +276,6 @@ node skills/browser_executor/scripts/browser.js script /tmp/fda-scrape.json
 
 4. 保存本次运行快照到 `output/runs/YYYY-MM-DD.json`（完整数据，用于下次增量对比）
 
-5. 如果 `WEBHOOK_URL` 环境变量已配置，执行通知脚本推送简报到企业微信/钉钉群：
-```bash
-bash scripts/notify.sh output/CSP_Leads_Report.md
-```
-
 ### 报告要求
 
 - 按风险等级从高到低排列
