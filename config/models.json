@@ -1,7 +1,7 @@
 {
   "providers": {
-    "qwen": {
-      "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "ali-token-plan": {
+      "baseUrl": "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
       "api": "openai-completions",
       "apiKey": "$DASHSCOPE_API_KEY",
       "compat": {
@@ -9,20 +9,56 @@
       },
       "models": [
         {
-          "id": "qwen-max",
-          "name": "Qwen Max",
-          "reasoning": false,
+          "id": "qwen3.7-max",
+          "name": "Qwen 3.7 Max",
+          "reasoning": true,
           "input": ["text"],
           "contextWindow": 32768,
           "maxTokens": 8192,
           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
         },
         {
-          "id": "qwen-plus",
-          "name": "Qwen Plus",
+          "id": "qwen3.7-plus",
+          "name": "Qwen 3.7 Plus",
+          "reasoning": true,
+          "input": ["text"],
+          "contextWindow": 131072,
+          "maxTokens": 8192,
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+        },
+        {
+          "id": "deepseek-v4-pro",
+          "name": "DeepSeek V4 Pro",
+          "reasoning": true,
+          "input": ["text"],
+          "contextWindow": 131072,
+          "maxTokens": 8192,
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+        },
+        {
+          "id": "deepseek-v4-flash",
+          "name": "DeepSeek V4 Flash",
           "reasoning": false,
           "input": ["text"],
           "contextWindow": 131072,
+          "maxTokens": 8192,
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+        },
+        {
+          "id": "glm-5.2",
+          "name": "GLM 5.2",
+          "reasoning": true,
+          "input": ["text"],
+          "contextWindow": 131072,
+          "maxTokens": 8192,
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+        },
+        {
+          "id": "kimi-k2.6",
+          "name": "Kimi K2.6",
+          "reasoning": true,
+          "input": ["text"],
+          "contextWindow": 262144,
           "maxTokens": 8192,
           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
         }
