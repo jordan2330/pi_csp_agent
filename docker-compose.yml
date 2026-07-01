@@ -1,12 +1,14 @@
 services:
   csp-agent:
     build: .
+    user: "${UID:-1000}:${GID:-1000}"
     environment:
       - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY}
+      - HOME=/home/agent
     volumes:
       - .:/workspace
-      - pi-agent-home:/root/.pi/agent
-      - ./config/models.json:/root/.pi/agent/models.json:ro
+      - pi-agent-home:/home/agent/.pi/agent
+      - ./config/models.json:/home/agent/.pi/agent/models.json:ro
     stdin_open: true
     tty: true
 

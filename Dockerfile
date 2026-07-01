@@ -13,5 +13,10 @@ ENV NODE_PATH=/usr/local/lib/node_modules
 RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 RUN npm install -g playwright
 
+# 创建非 root 用户的 home 目录，权限开放给任意 UID
+RUN mkdir -p /home/agent/.pi/agent && chmod -R 777 /home/agent
+
+ENV HOME=/home/agent
+
 WORKDIR /workspace
 ENTRYPOINT ["pi"]
