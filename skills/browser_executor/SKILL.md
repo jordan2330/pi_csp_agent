@@ -71,3 +71,22 @@ node scripts/browser.js screenshot <url> <output-path>
 
 - 任何步骤失败，整个脚本终止，错误信息输出到 stderr
 - 建议 Pi 在遇到错误时截图调试，然后调整选择器重试
+
+## 反检测机制（已内置）
+
+browser.js 已内置以下反爬虫措施，无需额外配置：
+- 隐藏 `navigator.webdriver` 标志
+- 注入伪装的 `navigator.plugins`、`navigator.languages`、`window.chrome`
+- 禁用 `AutomationControlled` 特征
+- 伪装 User-Agent 和 Accept-Language 头
+- Cookie 持久化（跨调用保持会话）
+
+如遇验证码，截图保存并跳过当前任务。
+
+## 代码安全约束
+
+当你在 SKILL.md 中编写 browser script JSON 时，必须遵守：
+- **所有 `wait` 步骤必须设置 `timeout`**，禁止不设超时的等待
+- **禁止使用无限循环**（如 `while(true)`），所有循环必须有明确的退出条件
+- **每个 `extract` 步骤的输出必须是结构化 JSON**，禁止返回无结构的模糊字符串
+- **单个脚本的执行时间不应超过 120 秒**，超时由 Playwright 自动终止

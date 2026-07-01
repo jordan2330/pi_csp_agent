@@ -71,23 +71,34 @@ node skills/browser_executor/scripts/browser.js script /tmp/fda-scrape.json
 
 4. 去重 Source 列得到唯一 API 列表。对于含多个 API 的行（分号分隔），拆分为单独的 API。
 
-5. 构建结构化数据并写入 `config/fda_nitrosamines.json`：
+5. 构建结构化数据并写入 `config/fda_nitrosamines.json`。**使用状态机格式**（每个 API 独立跟踪搜索状态）：
 
 ```json
 {
   "last_updated": "2026-06-30",
   "fda_page_version": "2026-03-19",
-  "nitrosamines": [
-    {
-      "nitrosamine_name": "N-nitroso-atenolol",
-      "source_api": "Atenolol",
+  "apis": {
+    "Atenolol": {
+      "limit": "1500 ng/day",
       "potency_category": 4,
-      "ai_limit": "1500 ng/day"
+      "fda_detected_at": "2026-06-30",
+      "china_trial_searched": false,
+      "china_trial_last_search": null,
+      "lead_count": 0
+    },
+    "Metoprolol": {
+      "limit": "1500 ng/day",
+      "potency_category": 4,
+      "fda_detected_at": "2026-06-30",
+      "china_trial_searched": true,
+      "china_trial_last_search": "2026-06-23",
+      "lead_count": 2
     }
-  ],
-  "unique_apis": ["Atenolol", "Metoprolol", ...]
+  }
 }
 ```
+
+**关键：保留上次运行中已存在的 API 状态**。如果某个 API 上次已搜索过（`china_trial_searched: true`），更新其 FDA 数据但保留搜索状态。仅对 `china_trial_searched: false` 的新增 API 执行 Phase 2 搜索。
 
 ### 错误处理
 
@@ -100,11 +111,15 @@ node skills/browser_executor/scripts/browser.js script /tmp/fda-scrape.json
 
 ### 目标
 
-对每个 API 在 chinadrugtrials.org.cn 搜索相关临床试验，提取申请人信息。
+对每个**未搜索过的** API（`china_trial_searched: false`）在 chinadrugtrials.org.cn 搜索相关临床试验，提取申请人信息。
+
+### 断点续传机制
+
+读取 `config/fda_nitrosamines.json`，跳过所有 `china_trial_searched: true` 的 API。仅对 `china_trial_searched: false` 的 API 执行搜索。搜索完成后立即更新该 API 的状态为 `china_trial_searched: true` 并写入文件，防止中断后重复搜索。
 
 ### 搜索策略
 
-对 `fda_nitrosamines.json` 中的每个 API：
+对 `fda_nitrosamines.json` 中每个 `china_trial_searched: false` 的 API：
 1. 用英文名搜索（部分平台支持英文搜索）
 2. 如果英文搜索无结果，用中文名搜索（你需要根据英文名推断中文名）
 3. 如果都无结果，跳过该 API 并记录
@@ -164,6 +179,8 @@ node skills/browser_executor/scripts/browser.js script /tmp/fda-scrape.json
    - 登记日期
 
 4. 如果搜索结果有多页，需要翻页提取（创建包含多次点击"下一页"和提取的脚本）
+
+5. **搜索完成后立即更新状态**：将该 API 在 `config/fda_nitrosamines.json` 中的 `china_trial_searched` 设为 `true`，`china_trial_last_search` 设为当天日期，`lead_count` 设为找到的临床试验数，写入文件。这样即使后续中断，下次运行也会跳过已搜索的 API。
 
 ### 提取结果格式
 
@@ -258,6 +275,11 @@ node skills/browser_executor/scripts/browser.js script /tmp/fda-scrape.json
 ```
 
 4. 保存本次运行快照到 `output/runs/YYYY-MM-DD.json`（完整数据，用于下次增量对比）
+
+5. 如果 `WEBHOOK_URL` 环境变量已配置，执行通知脚本推送简报到企业微信/钉钉群：
+```bash
+bash scripts/notify.sh output/CSP_Leads_Report.md
+```
 
 ### 报告要求
 

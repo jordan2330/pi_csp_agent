@@ -14,3 +14,10 @@ argument-hint: "<scenario>"
    - 交互模式：暂停并向用户说明情况，等待指示
    - 自动模式（pi -p）：截图保存，记录错误，继续下一个API
 5. 完成后输出 output/CSP_Leads_Report.md 的路径，并简要总结新增商机数量
+
+## 代码安全约束
+
+- 所有 wait 步骤必须设置 timeout，禁止无限等待
+- 禁止使用 while(true) 等无限循环
+- 每个 extract 步骤的输出必须是结构化 JSON
+- 单个 browser script 执行时间不超过 120 秒

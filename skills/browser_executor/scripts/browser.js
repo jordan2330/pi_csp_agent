@@ -6,6 +6,23 @@ const fs = require('fs');
 const STATE_FILE = '/tmp/browser-state.json';
 const DEFAULT_TIMEOUT = 30000;
 
+const STEALTH_ARGS = [
+  '--no-sandbox',
+  '--disable-setuid-sandbox',
+  '--disable-blink-features=AutomationControlled',
+  '--disable-features=IsolateOrigins,site-per-process',
+  '--disable-infobars',
+  '--window-size=1280,720',
+  '--disable-dev-shm-usage',
+];
+
+const STEALTH_INIT_SCRIPT = `
+  Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+  Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+  Object.defineProperty(navigator, 'languages', { get: () => ['zh-CN', 'zh', 'en'] });
+  window.chrome = { runtime: {} };
+`;
+
 function usage() {
   console.error(`Usage:
   node browser.js script <path-to-json-script>    Execute multi-step browser script
@@ -29,21 +46,23 @@ Output: JSON array of extraction results, in order of extract steps.
   process.exit(1);
 }
 
-async function runScript(scriptPath) {
-  const script = JSON.parse(fs.readFileSync(scriptPath, 'utf8'));
-  const steps = script.steps || [];
-
+async function createBrowser() {
   const browser = await chromium.launch({
     headless: true,
     executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    args: STEALTH_ARGS,
   });
 
   const context = await browser.newContext({
     locale: 'zh-CN',
     viewport: { width: 1280, height: 720 },
     userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    extraHTTPHeaders: {
+      'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+    },
   });
+
+  await context.addInitScript(STEALTH_INIT_SCRIPT);
 
   // Restore cookies if state file exists
   if (fs.existsSync(STATE_FILE)) {
@@ -55,6 +74,14 @@ async function runScript(scriptPath) {
     }
   }
 
+  return { browser, context };
+}
+
+async function runScript(scriptPath) {
+  const script = JSON.parse(fs.readFileSync(scriptPath, 'utf8'));
+  const steps = script.steps || [];
+
+  const { browser, context } = await createBrowser();
   const page = await context.newPage();
   const results = [];
 
@@ -91,7 +118,6 @@ async function runScript(scriptPath) {
                   )
                 );
               }
-              // Return structured list items if no table
               const items = el.querySelectorAll('li, tr, .item');
               if (items.length > 0) {
                 return Array.from(items).map(item => item.textContent.trim());
@@ -113,7 +139,8 @@ async function runScript(scriptPath) {
 
         default:
           console.error(`Unknown action: ${step.action}`);
-          process.exit(1);
+          process.exitCode = 1;
+          return;
       }
     }
 
@@ -133,16 +160,8 @@ async function runScript(scriptPath) {
 }
 
 async function runScreenshot(url, outputPath) {
-  const browser = await chromium.launch({
-    headless: true,
-    executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
-  });
-
-  const page = await browser.newPage({
-    locale: 'zh-CN',
-    viewport: { width: 1280, height: 720 },
-  });
+  const { browser, context } = await createBrowser();
+  const page = await context.newPage();
 
   try {
     await page.goto(url, { waitUntil: 'networkidle', timeout: DEFAULT_TIMEOUT });
