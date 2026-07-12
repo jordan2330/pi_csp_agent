@@ -4,12 +4,11 @@ services:
     environment:
       - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY}
       - BROWSER_ENDPOINT=${BROWSER_ENDPOINT}
+      - HOST_UID=${UID:-1000}
+      - HOST_GID=${GID:-1000}
     volumes:
       - .:/workspace
-      - pi-agent-home:/root/.pi/agent
-      - ./config/models.json:/root/.pi/agent/models.json:ro
+      - ./pi-home:/home/piuser
+      - ./config/models.json:/home/piuser/.pi/agent/models.json:ro
     stdin_open: true
     tty: true
-
-volumes:
-  pi-agent-home:

@@ -100,12 +100,27 @@ async function createBrowser() {
 
 async function executeStep(page, step, results) {
   switch (step.action) {
-    case 'navigate':
-      await page.goto(step.url, {
-        waitUntil: step.waitUntil || 'domcontentloaded',
-        timeout: step.timeout || DEFAULT_TIMEOUT,
-      });
+    case 'navigate': {
+      const maxRetries = step.retries || 3;
+      let lastErr;
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          await page.goto(step.url, {
+            waitUntil: step.waitUntil || 'domcontentloaded',
+            timeout: step.timeout || DEFAULT_TIMEOUT,
+          });
+          lastErr = null;
+          break;
+        } catch (e) {
+          lastErr = e;
+          if (attempt < maxRetries) {
+            await page.waitForTimeout(2000 * attempt);
+          }
+        }
+      }
+      if (lastErr) throw lastErr;
       break;
+    }
 
     case 'type':
       await page.fill(step.selector, step.text, { timeout: step.timeout || DEFAULT_TIMEOUT });

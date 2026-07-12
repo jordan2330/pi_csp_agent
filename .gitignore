@@ -1,7 +1,8 @@
 .env
 output/runs/
 node_modules/
-scripts/
+/scripts/
+pi-home/
 *.log
 .superpowers/
 docs/superpowers/

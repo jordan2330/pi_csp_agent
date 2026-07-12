@@ -9,7 +9,7 @@ This is a Pi Coding Agent project for CSP (Aptar active packaging) sales lead di
 - Provider: Aliyun DashScope (百炼) via OpenAI-compatible API
 - Endpoint: `https://dashscope.aliyuncs.com/compatible-mode/v1`
 - Models: `qwen3.7-max` / `deepseek-v4-pro` / `glm-5.2` / `kimi-k2.6` for complex reasoning, `qwen3.7-plus` / `deepseek-v4-flash` for routine tasks
-- Config: `config/models.json` → mounted to `/root/.pi/agent/models.json` in Docker
+- Config: `config/models.json` → mounted to `/home/piuser/.pi/agent/models.json` in Docker (容器以宿主机 UID 运行，非 root)
 - API key: `DASHSCOPE_API_KEY` environment variable
 - All models use `thinkingFormat: "qwen"` (Aliyun unified endpoint)
 

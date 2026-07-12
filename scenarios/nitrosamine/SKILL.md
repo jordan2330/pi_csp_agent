@@ -139,82 +139,58 @@ node skills/browser_executor/scripts/browser.js script /tmp/fda-scrape.json
 
 搜索页面 URL：`https://www.chinadrugtrials.org.cn/clinicaltrials.searchlist.dhtml`
 
-1. **重要**：你需要先访问一次搜索页面，截图分析实际的 HTML 结构，然后调整下列选择器。选择器可能因网站更新而变化。
+#### 推荐方式：使用 cdt-search.js 脚本
 
-2. 创建 browser script JSON 文件（如 `/tmp/trial-search.json`）：
+`skills/browser_executor/scripts/cdt-search.js` 是专用搜索脚本，自动完成搜索、翻页和详情页提取：
 
-```json
-{
-  "steps": [
-    {
-      "action": "navigate",
-      "url": "https://www.chinadrugtrials.org.cn/clinicaltrials.searchlist.dhtml",
-      "timeout": 60000
-    },
-    {
-      "action": "wait",
-      "selector": "#keywords",
-      "timeout": 30000
-    },
-    {
-      "action": "type",
-      "selector": "#keywords",
-      "text": "API中文名"
-    },
-    {
-      "action": "click",
-      "selector": "#goSearch"
-    },
-    {
-      "action": "delay",
-      "ms": 2000
-    },
-    {
-      "action": "wait",
-      "selector": "table",
-      "timeout": 30000
-    },
-    {
-      "action": "extract",
-      "selector": "table",
-      "format": "json"
-    },
-    {
-      "action": "loop",
-      "exit_when": { "selector": "ul.pagination li.active + li", "condition": "missing" },
-      "max_iterations": 20,
-      "delay_ms": 1000,
-      "steps": [
-        { "action": "click", "selector": "ul.pagination li.active + li a" },
-        { "action": "delay", "ms": 2000 },
-        { "action": "wait", "selector": "table", "timeout": 15000 },
-        { "action": "extract", "selector": "table", "format": "json" }
-      ]
-    }
-  ]
-}
+```bash
+node skills/browser_executor/scripts/cdt-search.js "API中文名" /tmp/cdt-result.json [--max-details 30] [--max-pages 10]
 ```
 
-3. 翻页说明（选择器已于 2026-07-12 实测验证）：
-   - 搜索框：`#keywords`（`<input type="text" name="keywords" id="keywords">`）
-   - 搜索按钮：`#goSearch`（`<div id="goSearch" class="search">`，不是 `<input type="submit">`）
-   - 结果表格：`table`（单表格，列为：序号/登记号/试验状态/药物名称/适应症/试验通俗题目）
-   - 分页：`<ul class="pagination">` 内 `<li class="active">` 标记当前页
-   - 首页 `extract` 在 `loop` 外部
-   - `loop` 在每次迭代开始前检查 `exit_when`：`ul.pagination li.active + li` 是否存在（当前页后是否还有下一页 `<li>`）
-   - 存在下一页 → 执行子步骤：点击下一页链接 → 延时2秒 → 等待表格 → 提取
-   - 不存在下一页 → 退出循环（首页已提取，不会漏数据）
-   - 如果选择器因网站更新而失效，先截图分析实际HTML再调整
+- `--max-details N`：最多获取 N 条详情页（默认30，设0=全部）。详情页含申请人名称，但每条需单独加载，大量结果时会很慢
+- `--max-pages N`：最多翻 N 页（默认10，每页20条）
+- 输出 JSON 格式，包含每条试验的完整字段
 
-4. 对每个 API 执行搜索脚本，提取以下字段：
-   - 申请人/申办者
-   - 试验名称/药物名称
-   - 试验状态（如：进行中、已完成、已招募）
-   - 适应症
-   - 试验分期（I期、II期、III期、IV期）
-   - 主要研究者
-   - 试验机构
-   - 登记日期
+#### 页面结构说明（2026-07-12 实测验证）
+
+**搜索结果页** (`searchlist.dhtml`)：
+- **搜索方式**：直接 URL 参数 `?keywords=关键词`，**不要**用表单 `type` + `click` 交互。URL参数最可靠，页面直接返回过滤后的结果
+- **结果表格**：`table.searchTable`，列为：序号 / 登记号 / 试验状态 / 药物名称 / 适应症 / 试验通俗题目
+- **分页信息**：`div.pageInfo` 内含「当前第 X 页，共 Y 页，共 Z 条记录」
+- **翻页方式**：JS 函数 `gotopage(N)`，通过 `evaluate` action 调用。**不是** `ul.pagination` + `<li>` 结构
+- **每页行数**：固定20条
+
+**详情页** (`searchlistdetail.dhtml?reg_no=XXX`)：
+- **Table 0**：登记号、试验状态、申请人联系人、首次公示信息日期、申请人名称
+- **Table 1**：药物名称、药物类型、适应症、试验题目（科学/通俗）、方案编号
+- **Table 2**：申请人名称、联系人姓名/电话/Email/地址
+- **Table 3**：试验分类、试验分期、设计类型、试验范围
+- **Table 13**：主要研究者（姓名、学位、职称、电话、Email、单位）
+- **Table 14**：试验机构列表（机构名称、主要研究者、省、城市）
+- **Table 15**：伦理审批（委员会名称、审查结论、批准日期）
+- **Table 16**：目标入组人数、已入组人数
+- **Table 17**：第一例知情同意日期、第一例入组日期、试验完成日期
+
+**重要提示**：
+- 页面是服务端渲染（SSR），数据直接在 HTML 中，无需等待 JS 加载
+- `#goSearch` 是 `<div>` 元素（非 button），用 `click` action 可触发，但不如直接 URL 参数可靠
+- 搜索结果表格里 `<a onclick="getDetail(this.id)">` 的 id 属性可用于构造详情页 URL
+- 该站**无** JS challenge / 反爬保护，之前报告的 HTTP 202 是误判（可能是 browserless 连接复用问题）
+
+#### 提取字段
+
+对每条搜索结果，提取以下字段：
+- **申请人名称**（来自详情页 Table 0）
+- 登记号（CTR编号）
+- 试验状态（进行中/已完成/尚未招募）
+- 药物名称
+- 适应症
+- 试验通俗题目
+- 试验分期（I期/II期/III期/IV期/其它-BE）
+- 主要研究者姓名和单位
+- 试验机构列表（名称+城市）
+- 首次公示信息日期
+- 伦理审批日期
 
 ### ClinicalTrials.gov 回退流程（备选）
 

@@ -50,10 +50,13 @@ nano .env
 # 3. 构建镜像（瘦身后不含 Chromium，构建较快）
 docker compose build
 
-# 4. 启动交互模式
+# 4. 创建 pi-home 目录（容器内 piuser 的 HOME，首次运行需要）
+mkdir -p pi-home
+
+# 5. 启动交互模式
 docker compose run --rm csp-agent
 
-# 5. 在 Pi TUI 中执行
+# 6. 在 Pi TUI 中执行
 /model qwen3.7-max          # 选择模型
 /lead-scan nitrosamine      # 启动商机发掘
 ```
@@ -91,9 +94,6 @@ ls output/runs/
 
 # FDA 缓存 — 每次运行自动刷新
 cat config/fda_nitrosamines.json | python3 -m json.tool | head -20
-
-# 修复文件归属（容器以 root 运行，生成的文件是 root 所有）
-chown -R $(id -u):$(id -g) output/ config/
 ```
 
 报告结构：
@@ -111,10 +111,10 @@ crontab -e
 
 添加：
 ```cron
-0 8 * * 1 cd /home/$USER/pi_csp_agent && docker compose run --rm csp-agent -p "/lead-scan nitrosamine" >> output/cron.log 2>&1 && chown -R $(id -u):$(id -g) output/ config/
+0 8 * * 1 cd /home/$USER/pi_csp_agent && docker compose run --rm csp-agent -p "/lead-scan nitrosamine" >> output/cron.log 2>&1
 ```
 
-> **注意**：`chown` 命令必须在 `docker compose run` 之后执行，将 root 生成的文件归属改回当前用户。`$GID` 在 bash 中不是标准变量，用 `$(id -g)` 代替。
+> **文件权限**：容器以宿主机 UID 运行（通过 `entrypoint.sh` + `gosu`），生成的文件自动归属宿主机用户，无需手动 `chown`。
 
 ## 扩展功能
 
@@ -177,7 +177,7 @@ argument-hint: "<scenario>"
 | VNC 看不到浏览器 | browserless 默认 headless 模式 | `.env` 中 `BROWSER_ENDPOINT` URL 加 `&headless=false` |
 | 网站反爬 | chinadrugtrials 可能有验证码 | browser.js 已内置反检测 + browserless stealth；首次运行建议交互模式观察 |
 | CSS 选择器失效 | 网站改版导致选择器不匹配 | SKILL.md 选择器已于 2026-07-12 实测验证；如失效先用 screenshot 模式分析 |
-| 文件归属 root | 容器以 root 运行 | 运行后执行 `chown -R $(id -u):$(id -g) output/ config/` |
+| 文件权限 | 容器以宿主机 UID 运行 | `entrypoint.sh` 自动处理，无需手动 chown |
 | FDA 季度更新 | FDA 页面每季度更新一次 | Agent 每次运行自动刷新，无需手动干预 |
 
 ## 故障排除
@@ -236,12 +236,16 @@ docker compose build --no-cache
 
 ### chinadrugtrials 搜索结果为空
 
-1. 确认 browserless 连接正常（见上"browserless 连接失败"）
+1. 确认 browserless 连接正常（见上“browserless 连接失败”）
 2. 用截图模式检查页面是否正常加载：
    ```bash
    docker compose run --rm csp-agent bash -c "node skills/browser_executor/scripts/browser.js screenshot https://www.chinadrugtrials.org.cn/clinicaltrials.searchlist.dhtml /tmp/test.png"
    ```
 3. 如果页面正常但搜索无结果，检查搜索词是否为中文（`name_cn`），英文搜索可能无效
+4. chinadrugtrials 搜索使用专用脚本 `cdt-search.js`，自动处理搜索/翻页/详情提取：
+   ```bash
+   docker compose run --rm csp-agent bash -c 'node skills/browser_executor/scripts/cdt-search.js "阿替洛尔" /tmp/test.json --max-details 5'
+   ```
 
 ## 项目结构
 
@@ -256,11 +260,14 @@ pi-csp-agent/
 │   └── fda_nitrosamines.json          # FDA 数据缓存（自动生成）
 ├── skills/browser_executor/
 │   ├── SKILL.md                       # 浏览器工具使用说明（含 select/evaluate/loop/delay action）
-│   └── scripts/browser.js             # Playwright 自动化脚本（双模式：本地 launch 或远程 connectOverCDP）
+│   └── scripts/
+│       ├── browser.js                 # Playwright 自动化脚本（双模式：本地 launch 或远程 connectOverCDP）
+│       └── cdt-search.js              # chinadrugtrials.org.cn 专用搜索脚本（搜索+翻页+详情提取）
 ├── scenarios/nitrosamine/
 │   ├── SKILL.md                       # 亚硝胺场景三阶段 pipeline
 │   └── references/csp-recommendations.md  # CSP 产品推荐规则
 ├── prompts/lead-scan.md               # 入口命令 /lead-scan <scenario>
+├── pi-home/                           # 容器内 piuser 的 HOME（自动生成，已 gitignore）
 └── output/
     ├── CSP_Leads_Report.md            # 商机报告
     └── runs/                          # 运行快照（增量对比用）

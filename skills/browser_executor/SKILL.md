@@ -71,7 +71,7 @@ node skills/browser_executor/scripts/browser.js screenshot <url> <output-path>
 
 | Action | 参数 | 说明 |
 |--------|------|------|
-| `navigate` | `url`, `timeout`(可选), `waitUntil`(可选, 默认`domcontentloaded`) | 导航到指定URL。**注意：默认使用`domcontentloaded`而非`networkidle`**，因为部分网站（如chinadrugtrials）有持久连接，`networkidle`永不触发。可在步骤中用`"waitUntil": "networkidle"`覆盖 |
+| `navigate` | `url`, `timeout`(可选), `waitUntil`(可选, 默认`domcontentloaded`), `retries`(可选, 默认3) | 导航到指定URL。**默认使用`domcontentloaded`而非`networkidle`**，因为部分网站（如chinadrugtrials）有持久连接。失败时自动重试（默认3次，每次间隔递增） |
 | `type` | `selector`, `text`, `timeout`(可选) | 在输入框中填入文本 |
 | `click` | `selector`, `timeout`(可选) | 点击元素 |
 | `wait` | `selector`, `timeout`(可选) | 等待元素出现，默认超时30秒 |
