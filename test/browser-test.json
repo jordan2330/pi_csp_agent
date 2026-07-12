@@ -1,0 +1,42 @@
+{
+  "steps": [
+    {
+      "action": "navigate",
+      "url": "file://REPLACE_WITH_ABSOLUTE_PATH_TO_test/browser-test.html",
+      "timeout": 10000
+    },
+    {
+      "action": "wait",
+      "selector": "#data-table",
+      "timeout": 5000
+    },
+    {
+      "action": "evaluate",
+      "script": "document.getElementById('js-value').textContent"
+    },
+    {
+      "action": "select",
+      "selector": "#page-size",
+      "value": "-1"
+    },
+    {
+      "action": "delay",
+      "ms": 500
+    },
+    {
+      "action": "extract",
+      "selector": "#data-table",
+      "format": "json"
+    },
+    {
+      "action": "loop",
+      "exit_when": { "selector": ".next.disabled", "condition": "exists" },
+      "max_iterations": 5,
+      "delay_ms": 100,
+      "steps": [
+        { "action": "evaluate", "script": "document.querySelector('.next.disabled') ? 'disabled-found' : 'not-disabled'" },
+        { "action": "click", "selector": ".next.disabled", "timeout": 1000 }
+      ]
+    }
+  ]
+}

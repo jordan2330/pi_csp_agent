@@ -3,6 +3,7 @@ services:
     build: .
     environment:
       - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY}
+      - BROWSER_ENDPOINT=${BROWSER_ENDPOINT}
     volumes:
       - .:/workspace
       - pi-agent-home:/root/.pi/agent

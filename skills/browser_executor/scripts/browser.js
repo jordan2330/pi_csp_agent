@@ -2,8 +2,10 @@
 
 const { chromium } = require('playwright');
 const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
-const STATE_FILE = '/tmp/browser-state.json';
+const STATE_FILE = path.join(os.tmpdir(), 'browser-state.json');
 const DEFAULT_TIMEOUT = 30000;
 
 const STEALTH_ARGS = [
@@ -35,9 +37,23 @@ Script JSON format:
       { "action": "type", "selector": "#input", "text": "query" },
       { "action": "click", "selector": "#button" },
       { "action": "wait", "selector": ".results", "timeout": 30000 },
+      { "action": "select", "selector": "#page-size", "value": "-1" },
+      { "action": "evaluate", "script": "document.title" },
+      { "action": "delay", "ms": 2000 },
       { "action": "extract", "selector": ".table", "format": "json" },
-      { "action": "extract", "selector": ".text", "format": "text" },
-      { "action": "screenshot", "path": "/tmp/debug.png" }
+      { "action": "screenshot", "path": "/tmp/debug.png" },
+      {
+        "action": "loop",
+        "exit_when": { "selector": ".next.disabled", "condition": "exists" },
+        "max_iterations": 20,
+        "delay_ms": 1000,
+        "steps": [
+          { "action": "click", "selector": ".next" },
+          { "action": "delay", "ms": 2000 },
+          { "action": "wait", "selector": ".results", "timeout": 15000 },
+          { "action": "extract", "selector": ".results", "format": "json" }
+        ]
+      }
     ]
   }
 
@@ -47,11 +63,17 @@ Output: JSON array of extraction results, in order of extract steps.
 }
 
 async function createBrowser() {
-  const browser = await chromium.launch({
-    headless: true,
-    executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
-    args: STEALTH_ARGS,
-  });
+  let browser;
+
+  if (process.env.BROWSER_ENDPOINT) {
+    browser = await chromium.connectOverCDP(process.env.BROWSER_ENDPOINT);
+  } else {
+    browser = await chromium.launch({
+      headless: true,
+      executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
+      args: STEALTH_ARGS,
+    });
+  }
 
   const context = await browser.newContext({
     locale: 'zh-CN',
@@ -64,7 +86,6 @@ async function createBrowser() {
 
   await context.addInitScript(STEALTH_INIT_SCRIPT);
 
-  // Restore cookies if state file exists
   if (fs.existsSync(STATE_FILE)) {
     try {
       const state = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
@@ -77,6 +98,109 @@ async function createBrowser() {
   return { browser, context };
 }
 
+async function executeStep(page, step, results) {
+  switch (step.action) {
+    case 'navigate':
+      await page.goto(step.url, {
+        waitUntil: step.waitUntil || 'domcontentloaded',
+        timeout: step.timeout || DEFAULT_TIMEOUT,
+      });
+      break;
+
+    case 'type':
+      await page.fill(step.selector, step.text, { timeout: step.timeout || DEFAULT_TIMEOUT });
+      break;
+
+    case 'click':
+      await page.click(step.selector, { timeout: step.timeout || DEFAULT_TIMEOUT });
+      break;
+
+    case 'wait':
+      await page.waitForSelector(step.selector, { timeout: step.timeout || DEFAULT_TIMEOUT });
+      break;
+
+    case 'select':
+      await page.selectOption(step.selector, step.value, { timeout: step.timeout || DEFAULT_TIMEOUT });
+      break;
+
+    case 'evaluate': {
+      const result = await page.evaluate(step.script);
+      results.push(result);
+      break;
+    }
+
+    case 'delay':
+      await page.waitForTimeout(step.ms);
+      break;
+
+    case 'extract': {
+      const format = step.format || 'text';
+      if (format === 'json') {
+        const data = await page.evaluate((sel) => {
+          const el = document.querySelector(sel);
+          if (!el) return null;
+          const tables = el.querySelectorAll('table');
+          if (tables.length > 0) {
+            return Array.from(tables).map(table =>
+              Array.from(table.querySelectorAll('tr')).map(row =>
+                Array.from(row.querySelectorAll('td,th')).map(cell => cell.textContent.trim())
+              )
+            );
+          }
+          const items = el.querySelectorAll('li, tr, .item');
+          if (items.length > 0) {
+            return Array.from(items).map(item => item.textContent.trim());
+          }
+          return el.textContent.trim();
+        }, step.selector);
+        results.push(data);
+      } else {
+        const text = await page.textContent(step.selector, { timeout: step.timeout || DEFAULT_TIMEOUT });
+        results.push(text ? text.trim() : null);
+      }
+      break;
+    }
+
+    case 'screenshot':
+      await page.screenshot({ path: step.path, fullPage: step.fullPage || false });
+      results.push({ screenshot: step.path });
+      break;
+
+    case 'loop': {
+      const maxIterations = Math.min(step.max_iterations || 20, 50);
+      const delayMs = step.delay_ms || 0;
+      const exitWhen = step.exit_when;
+
+      for (let i = 0; i < maxIterations; i++) {
+        if (exitWhen) {
+          const element = await page.$(exitWhen.selector);
+          let shouldExit = false;
+          if (exitWhen.condition === 'exists') {
+            shouldExit = !!element;
+          } else if (exitWhen.condition === 'missing') {
+            shouldExit = !element;
+          }
+          if (shouldExit) break;
+        }
+
+        for (const subStep of step.steps) {
+          await executeStep(page, subStep, results);
+        }
+
+        if (delayMs > 0) {
+          await page.waitForTimeout(delayMs);
+        }
+      }
+      break;
+    }
+
+    default:
+      console.error(`Unknown action: ${step.action}`);
+      process.exitCode = 1;
+      return;
+  }
+}
+
 async function runScript(scriptPath) {
   const script = JSON.parse(fs.readFileSync(scriptPath, 'utf8'));
   const steps = script.steps || [];
@@ -87,68 +211,12 @@ async function runScript(scriptPath) {
 
   try {
     for (const step of steps) {
-      switch (step.action) {
-        case 'navigate':
-          await page.goto(step.url, { waitUntil: 'networkidle', timeout: step.timeout || DEFAULT_TIMEOUT });
-          break;
-
-        case 'type':
-          await page.fill(step.selector, step.text, { timeout: step.timeout || DEFAULT_TIMEOUT });
-          break;
-
-        case 'click':
-          await page.click(step.selector, { timeout: step.timeout || DEFAULT_TIMEOUT });
-          break;
-
-        case 'wait':
-          await page.waitForSelector(step.selector, { timeout: step.timeout || DEFAULT_TIMEOUT });
-          break;
-
-        case 'extract': {
-          const format = step.format || 'text';
-          if (format === 'json') {
-            const data = await page.evaluate((sel) => {
-              const el = document.querySelector(sel);
-              if (!el) return null;
-              const tables = el.querySelectorAll('table');
-              if (tables.length > 0) {
-                return Array.from(tables).map(table =>
-                  Array.from(table.querySelectorAll('tr')).map(row =>
-                    Array.from(row.querySelectorAll('td,th')).map(cell => cell.textContent.trim())
-                  )
-                );
-              }
-              const items = el.querySelectorAll('li, tr, .item');
-              if (items.length > 0) {
-                return Array.from(items).map(item => item.textContent.trim());
-              }
-              return el.textContent.trim();
-            }, step.selector);
-            results.push(data);
-          } else {
-            const text = await page.textContent(step.selector, { timeout: step.timeout || DEFAULT_TIMEOUT });
-            results.push(text ? text.trim() : null);
-          }
-          break;
-        }
-
-        case 'screenshot':
-          await page.screenshot({ path: step.path, fullPage: step.fullPage || false });
-          results.push({ screenshot: step.path });
-          break;
-
-        default:
-          console.error(`Unknown action: ${step.action}`);
-          process.exitCode = 1;
-          return;
-      }
+      await executeStep(page, step, results);
     }
 
-    // Save cookies
     const cookies = await context.cookies();
     fs.writeFileSync(STATE_FILE, JSON.stringify({ cookies }));
 
-    // Output results as JSON
     console.log(JSON.stringify(results, null, 2));
 
   } catch (error) {
@@ -164,7 +232,7 @@ async function runScreenshot(url, outputPath) {
   const page = await context.newPage();
 
   try {
-    await page.goto(url, { waitUntil: 'networkidle', timeout: DEFAULT_TIMEOUT });
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: DEFAULT_TIMEOUT });
     await page.screenshot({ path: outputPath, fullPage: true });
     console.log(JSON.stringify({ success: true, path: outputPath }));
   } catch (error) {
@@ -175,7 +243,6 @@ async function runScreenshot(url, outputPath) {
   }
 }
 
-// Main
 const [action, ...args] = process.argv.slice(2);
 
 if (action === 'script') {
