@@ -3,7 +3,7 @@ services:
     build: .
     environment:
       - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY}
-      - BROWSER_ENDPOINT=${BROWSER_ENDPOINT}
+      - "BROWSER_ENDPOINT=${BROWSER_ENDPOINT:-ws://ssuzaip38.aptargroup.loc:3000/?token=PW8rJqSTzd&headless=false}"
     volumes:
       - .:/workspace
       - pi-agent-home:/root/.pi/agent
