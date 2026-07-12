@@ -5,13 +5,14 @@
 ## 架构概览
 
 ```
-┌──────────── Docker 容器 ────────────┐
-│                                      │
-│  Pi (Qwen LLM)                       │
-│  ├─ prompts/lead-scan.md  入口命令   │
-│  ├─ scenarios/nitrosamine/ 场景指令  │
-│  └─ skills/browser_executor/ 浏览器  │
-│       └─ browser.js (Playwright)     │
+┌──────────── Docker 容器 ────────────┐    ┌─ Browserless ─┐
+│                                      │    │               │
+│  Pi (Qwen LLM)                       │───→│  Chromium      │──→ FDA
+│  ├─ prompts/lead-scan.md  入口命令   │    │  (headless=   │──→ chinadrugtrials
+│  ├─ scenarios/nitrosamine/ 场景指令  │    │   false 可VNC) │──→ ClinicalTrials.gov
+│  └─ skills/browser_executor/ 浏览器  │    │               │
+│       └─ browser.js (Playwright)     │    └───────────────┘
+│           └─ connectOverCDP() ───────┼──────────┘
 │                                      │
 │  数据流：                             │
 │  FDA页面 → API列表 → 临床试验搜索     │
@@ -20,14 +21,16 @@
 ```
 
 - **Pi** 是大脑：读取 SKILL.md 指令，自主规划并执行
-- **browser.js** 是手：Playwright 封装，在真实 Chromium 中操作网页
+- **browser.js** 是手：通过 `BROWSER_ENDPOINT` 连接远程 browserless，在真实 Chromium 中操作网页
+- **browserless** 是外部浏览器服务：Docker 镜像不含 Chromium，通过 WebSocket 连接
 - **scenarios/** 是业务逻辑：每个场景一个独立 Skill，可插拔
 
 ## 前置要求
 
 - **Docker** + **Docker Compose**（推荐 Docker 24+）
 - **DashScope API Key**：在 [阿里云百炼](https://bailian.console.aliyun.com/) 控制台创建，模型包括 qwen3.7-max、deepseek-v4-pro、glm-5.2、kimi-k2.6 等
-- **网络**：能访问 `dashscope.aliyuncs.com`、`fda.gov`、`chinadrugtrials.org.cn`
+- **Browserless 服务**：独立部署的 browserless（用于浏览器自动化，Docker 镜像不含 Chromium，通过 WebSocket 连接远程 browserless）
+- **网络**：Docker 容器需能访问 `dashscope.aliyuncs.com`、`fda.gov`、`chinadrugtrials.org.cn`，以及 browserless 服务地址
 
 ## 快速开始
 
@@ -36,12 +39,15 @@
 git clone https://github.com/jordan2330/pi_csp_agent.git
 cd pi_csp_agent
 
-# 2. 配置 API Key
+# 2. 配置环境变量
 cp .env.example .env
 nano .env
-# 填入：DASHSCOPE_API_KEY=sk-你的key
+# 填入：
+#   DASHSCOPE_API_KEY=sk-你的key
+#   BROWSER_ENDPOINT=ws://your-browserless:3000/?token=xxx&headless=false
+#   # headless=false 让浏览器在 VNC 中可见（调试推荐）
 
-# 3. 构建镜像（首次约 5-10 分钟，下载 apt 包和 npm 包）
+# 3. 构建镜像（瘦身后不含 Chromium，构建较快）
 docker compose build
 
 # 4. 启动交互模式
@@ -167,9 +173,10 @@ argument-hint: "<scenario>"
 
 | 限制 | 说明 | 应对 |
 |------|------|------|
-| Docker 构建慢 | 首次下载 ~225MB apt 包 | 确保网络通畅，或配置 Debian 镜像源 |
-| 网站反爬 | chinadrugtrials 可能有验证码 | browser.js 已内置反检测（隐藏 webdriver 标志、伪装 UA），首次运行时建议交互模式观察 |
-| CSS 选择器失效 | 网站改版导致选择器不匹配 | SKILL.md 中指示 Agent 首次运行时截图分析页面结构，自主调整选择器 |
+| 依赖外部 browserless | Docker 镜像不含 Chromium，通过 `BROWSER_ENDPOINT` 连远程 browserless | 确保 browserless 服务可用；本地开发可不设 `BROWSER_ENDPOINT`（需本地 Chromium） |
+| VNC 看不到浏览器 | browserless 默认 headless 模式 | `.env` 中 `BROWSER_ENDPOINT` URL 加 `&headless=false` |
+| 网站反爬 | chinadrugtrials 可能有验证码 | browser.js 已内置反检测 + browserless stealth；首次运行建议交互模式观察 |
+| CSS 选择器失效 | 网站改版导致选择器不匹配 | SKILL.md 选择器已于 2026-07-12 实测验证；如失效先用 screenshot 模式分析 |
 | 文件归属 root | 容器以 root 运行 | 运行后执行 `chown -R $(id -u):$(id -g) output/ config/` |
 | FDA 季度更新 | FDA 页面每季度更新一次 | Agent 每次运行自动刷新，无需手动干预 |
 
@@ -180,8 +187,28 @@ argument-hint: "<scenario>"
 检查 `.env` 文件是否存在且内容正确：
 ```bash
 cat .env
-# 应输出：DASHSCOPE_API_KEY=sk-...
+# 应输出：
+# DASHSCOPE_API_KEY=sk-...
+# BROWSER_ENDPOINT=ws://...
 ```
+
+### browserless 连接失败 / VNC 看不到浏览器
+
+1. 检查 `.env` 中 `BROWSER_ENDPOINT` 是否设置：
+   ```bash
+   grep BROWSER_ENDPOINT .env
+   ```
+2. 测试 browserless 是否可达：
+   ```bash
+   curl "http://your-browserless:3000/json/version?token=xxx"
+   # 应返回 Chrome 版本信息 JSON
+   ```
+3. VNC 看不到浏览器窗口？在 `BROWSER_ENDPOINT` URL 后加 `&headless=false`
+4. 在容器内测试连接：
+   ```bash
+   docker compose run --rm csp-agent bash -c 'echo $BROWSER_ENDPOINT'
+   # 如果输出为空，说明 .env 未被 docker-compose 读取
+   ```
 
 ### Pi TUI 中 `/lead-scan` 命令不存在
 
@@ -209,15 +236,12 @@ docker compose build --no-cache
 
 ### chinadrugtrials 搜索结果为空
 
-1. 用截图模式检查页面是否正常加载：
+1. 确认 browserless 连接正常（见上"browserless 连接失败"）
+2. 用截图模式检查页面是否正常加载：
    ```bash
    docker compose run --rm csp-agent bash -c "node skills/browser_executor/scripts/browser.js screenshot https://www.chinadrugtrials.org.cn/clinicaltrials.searchlist.dhtml /tmp/test.png"
    ```
-2. 在容器内查看截图：
-   ```bash
-   docker compose run --rm --entrypoint bash csp-agent -c "ls /tmp/*.png"
-   ```
-3. 可能需要更新 SKILL.md 中的 CSS 选择器
+3. 如果页面正常但搜索无结果，检查搜索词是否为中文（`name_cn`），英文搜索可能无效
 
 ## 项目结构
 
@@ -228,10 +252,11 @@ pi-csp-agent/
 ├── .pi/settings.json                  # Pi 配置：skills/prompts 路径
 ├── config/
 │   ├── models.json                    # Qwen 模型配置
+│   ├── api_translations.json          # API 中英对照表（104对，来源USP参考文件）
 │   └── fda_nitrosamines.json          # FDA 数据缓存（自动生成）
 ├── skills/browser_executor/
-│   ├── SKILL.md                       # 浏览器工具使用说明
-│   └── scripts/browser.js             # Playwright 自动化脚本
+│   ├── SKILL.md                       # 浏览器工具使用说明（含 select/evaluate/loop/delay action）
+│   └── scripts/browser.js             # Playwright 自动化脚本（双模式：本地 launch 或远程 connectOverCDP）
 ├── scenarios/nitrosamine/
 │   ├── SKILL.md                       # 亚硝胺场景三阶段 pipeline
 │   └── references/csp-recommendations.md  # CSP 产品推荐规则
@@ -240,6 +265,8 @@ pi-csp-agent/
     ├── CSP_Leads_Report.md            # 商机报告
     └── runs/                          # 运行快照（增量对比用）
 ```
+
+> **注意**：Docker 镜像不含 Chromium（已瘦身），浏览器自动化通过 `BROWSER_ENDPOINT` 环境变量连接外部 browserless 服务。
 
 ## License
 

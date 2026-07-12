@@ -153,17 +153,17 @@ node skills/browser_executor/scripts/browser.js script /tmp/fda-scrape.json
     },
     {
       "action": "wait",
-      "selector": "input[name='keywords']",
+      "selector": "#keywords",
       "timeout": 30000
     },
     {
       "action": "type",
-      "selector": "input[name='keywords']",
+      "selector": "#keywords",
       "text": "API中文名"
     },
     {
       "action": "click",
-      "selector": "input[type='submit'], button[type='submit'], .search-btn"
+      "selector": "#goSearch"
     },
     {
       "action": "delay",
@@ -171,35 +171,40 @@ node skills/browser_executor/scripts/browser.js script /tmp/fda-scrape.json
     },
     {
       "action": "wait",
-      "selector": ".list, .result, table",
+      "selector": "table",
       "timeout": 30000
     },
     {
       "action": "extract",
-      "selector": ".list, .result, table",
+      "selector": "table",
       "format": "json"
     },
     {
       "action": "loop",
-      "exit_when": { "selector": ".next.disabled, .pagination .disabled", "condition": "exists" },
+      "exit_when": { "selector": "ul.pagination li.active + li", "condition": "missing" },
       "max_iterations": 20,
       "delay_ms": 1000,
       "steps": [
-        { "action": "click", "selector": ".next:not(.disabled), a.next:not(.disabled)" },
+        { "action": "click", "selector": "ul.pagination li.active + li a" },
         { "action": "delay", "ms": 2000 },
-        { "action": "wait", "selector": ".list, .result, table", "timeout": 15000 },
-        { "action": "extract", "selector": ".list, .result, table", "format": "json" }
+        { "action": "wait", "selector": "table", "timeout": 15000 },
+        { "action": "extract", "selector": "table", "format": "json" }
       ]
     }
   ]
 }
 ```
 
-3. 翻页说明：
+3. 翻页说明（选择器已于 2026-07-12 实测验证）：
+   - 搜索框：`#keywords`（`<input type="text" name="keywords" id="keywords">`）
+   - 搜索按钮：`#goSearch`（`<div id="goSearch" class="search">`，不是 `<input type="submit">`）
+   - 结果表格：`table`（单表格，列为：序号/登记号/试验状态/药物名称/适应症/试验通俗题目）
+   - 分页：`<ul class="pagination">` 内 `<li class="active">` 标记当前页
    - 首页 `extract` 在 `loop` 外部
-   - `loop` 在每次迭代开始前检查 `exit_when`（下一页按钮是否 disabled）
-   - 未 disabled → 执行子步骤：点击下一页 → 延时2秒 → 等待新结果 → 提取
-   - 已 disabled → 退出循环（首页已提取，不会漏数据）
+   - `loop` 在每次迭代开始前检查 `exit_when`：`ul.pagination li.active + li` 是否存在（当前页后是否还有下一页 `<li>`）
+   - 存在下一页 → 执行子步骤：点击下一页链接 → 延时2秒 → 等待表格 → 提取
+   - 不存在下一页 → 退出循环（首页已提取，不会漏数据）
+   - 如果选择器因网站更新而失效，先截图分析实际HTML再调整
 
 4. 对每个 API 执行搜索脚本，提取以下字段：
    - 申请人/申办者
