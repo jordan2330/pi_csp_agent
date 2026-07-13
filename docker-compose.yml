@@ -4,8 +4,6 @@ services:
     environment:
       - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY}
       - BROWSER_ENDPOINT=${BROWSER_ENDPOINT}
-      - HOST_UID=${UID:-1000}
-      - HOST_GID=${GID:-1000}
     volumes:
       - .:/workspace
       - ./pi-home:/home/piuser
