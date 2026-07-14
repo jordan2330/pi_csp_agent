@@ -97,9 +97,36 @@ cat config/fda_nitrosamines.json | python3 -m json.tool | head -20
 ```
 
 报告结构：
-- **概览**：API 数量、临床试验数量、按风险等级分布
-- **新增商机**：本次运行新发现的客户（最前面）
-- **全量列表**：按 FDA Potency Cat 1→5 分组的所有客户
+- **概览**：API 数量、临床试验数量、按风险等级分布、数据源分布
+- **新增商机**：本次运行新发现的客户（最前面），含产品名称和药物分类
+- **全量列表**：按 FDA Potency Cat 1→5 分组，每个API含：
+  - **企业联系方式**：联系人、电话、邮箱、地址（CDT来源）
+  - **产品名称**：药物名称（如“盐酸度洛西汀肠溶胶囊”），不等于 API 名
+  - **药物分类**：仿制药/原研药/新药/新药（改良型）
+  - **来源标注**：CDT（含联系方式）或 CT.gov
+
+### 全量搜索（首次部署）
+
+首次上线时需要全量搜索所有 API 在两个数据源上的试验数据。编辑 `config/search-config.json`：
+
+```bash
+# 改为全量模式
+nano config/search-config.json
+# 将 "search_mode" 改为 "full"
+
+# 执行扫描
+docker compose run --rm csp-agent -p "/lead-scan nitrosamine"
+```
+
+全量搜索完成后会自动将 `search_mode` 改回 `"incremental"`。之后的日常运行只搜索新增/未完成的 API。
+
+### 双源搜索机制
+
+每个 API 必须在两个数据源都搜索过：
+- **chinadrugtrials.org.cn**（主源）：用 API 中文名搜索，提取企业联系方式（联系人/电话/邮箱/地址）
+- **ClinicalTrials.gov**（辅源）：用英文名+China限定，补充国际药企在中国的临床数据
+
+两个来源独立跟踪搜索状态，互不影响。详见 `config/fda_nitrosamines.json` 中的 `searched_cdt` / `searched_ctgov` 字段。
 
 ## 定时任务
 
@@ -257,14 +284,15 @@ pi-csp-agent/
 ├── config/
 │   ├── models.json                    # Qwen 模型配置
 │   ├── api_translations.json          # API 中英对照表（104对，来源USP参考文件）
-│   └── fda_nitrosamines.json          # FDA 数据缓存（自动生成）
+│   ├── fda_nitrosamines.json          # FDA 数据缓存（双源搜索状态机，自动生成）
+│   └── search-config.json             # 搜索模式配置（full/incremental）
 ├── skills/browser_executor/
 │   ├── SKILL.md                       # 浏览器工具使用说明（含 select/evaluate/loop/delay action）
 │   └── scripts/
 │       ├── browser.js                 # Playwright 自动化脚本（双模式：本地 launch 或远程 connectOverCDP）
 │       └── cdt-search.js              # chinadrugtrials.org.cn 专用搜索脚本（搜索+翻页+详情提取）
 ├── scenarios/nitrosamine/
-│   ├── SKILL.md                       # 亚硝胺场景三阶段 pipeline
+│   ├── SKILL.md                       # 亚硝胺场景 pipeline（含双源搜索+药物分类+联系方式）
 │   └── references/csp-recommendations.md  # CSP 产品推荐规则
 ├── prompts/lead-scan.md               # 入口命令 /lead-scan <scenario>
 ├── pi-home/                           # 容器内 piuser 的 HOME（自动生成，已 gitignore）

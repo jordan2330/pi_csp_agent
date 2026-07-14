@@ -1,0 +1,17 @@
+{
+  "search_mode": "incremental",
+  "full_reset_note": "将 search_mode 改为 full 后执行 /lead-scan nitrosamine 即可全量重新搜索。搜索完成后会自动改回 incremental。",
+  "options": {
+    "full": "忽略所有搜索状态，全量重新搜索两个数据源（CDT + CT.gov）。首次上线或需要完整数据刷新时使用。",
+    "incremental": "仅搜索未完成的 API × 数据源组合。日常运行使用。"
+  },
+  "cdt": {
+    "max_pages": 10,
+    "max_details": 30,
+    "delay_between_details_ms": 1500
+  },
+  "ctgov": {
+    "max_pages": 20,
+    "delay_between_pages_ms": 1500
+  }
+}
