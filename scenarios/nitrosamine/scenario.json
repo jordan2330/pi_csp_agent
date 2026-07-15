@@ -1,0 +1,73 @@
+{
+  "name": "nitrosamine",
+  "title": "CSP 商机发掘报告 — 亚硝胺",
+  "report_file": "output/CSP_Leads_Report.md",
+  "cache_file": "config/fda_nitrosamines.json",
+  "cache_version_field": "fda_page_version",
+  "api_translations_file": "config/api_translations.json",
+  "source_label": "FDA (版本 {version}) + 中国药物临床试验登记与信息公示平台 + ClinicalTrials.gov",
+  "headings": {
+    "new_leads_section": "新增商机（本次）",
+    "new_lead_api": "{name_cn} {name_en} — {sponsorCount}家企业",
+    "full_leads_section": "全量商机列表",
+    "full_lead_api": "{name_cn} {name_en} ({trialCount}条试验, {sponsorCount}家企业)"
+  },
+  "category": {
+    "field": "potency_category",
+    "order": [1, 2, 3, 4, 5],
+    "labels": {
+      "1": "极高风险",
+      "2": "高风险",
+      "3": "中高风险",
+      "4": "中风险",
+      "5": "低风险"
+    },
+    "ai_limit_range": {
+      "1": "26.5-100",
+      "2": "100",
+      "3": "400",
+      "4": "1500",
+      "5": "1500"
+    },
+    "csp_by_category": {
+      "1": "Activ-Blister®",
+      "2": "Activ-Blister®",
+      "3": "3-Phase Activ-Polymer™",
+      "4": "3-Phase Activ-Polymer™ / Activ-Vial®",
+      "5": "Activ-Vial® / Activ-Film®"
+    }
+  },
+  "tables": {
+    "new_leads": {
+      "columns": [
+        { "header": "申请人", "key": "sponsor", "fmt": "truncate25" },
+        { "header": "产品名称", "key": "drugName", "fmt": "truncate20" },
+        { "header": "剂型", "key": "dosageForm", "fmt": "formBadge" },
+        { "header": "药物分类", "key": "drugClassification" },
+        { "header": "试验状态", "key": "status" },
+        { "header": "适应症", "key": "indication", "fmt": "truncate25" },
+        { "header": "试验分期", "key": "phase" },
+        { "header": "登记日期", "key": "regDate" },
+        { "header": "联系方式", "key": "contact", "fmt": "formatContact" },
+        { "header": "来源", "key": "source" }
+      ]
+    },
+    "full_leads": {
+      "columns": [
+        { "header": "申请人", "key": "sponsor", "fmt": "truncate28" },
+        { "header": "产品名称", "key": "drugName", "fmt": "truncate18" },
+        { "header": "剂型", "key": "dosageForm", "fmt": "formBadge" },
+        { "header": "药物分类", "key": "drugClassification" },
+        { "header": "联系人", "key": "contactName" },
+        { "header": "电话", "key": "contactPhone" },
+        { "header": "邮箱", "key": "contactEmail" },
+        { "header": "地址", "key": "contactAddress", "fmt": "truncate20" },
+        { "header": "试验状态", "key": "status" },
+        { "header": "适应症", "key": "indication", "fmt": "truncate28" },
+        { "header": "分期", "key": "phase" },
+        { "header": "来源", "key": "source" },
+        { "header": "新增", "key": "isNew", "fmt": "newBadge" }
+      ]
+    }
+  }
+}

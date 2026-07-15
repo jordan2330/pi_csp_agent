@@ -63,7 +63,26 @@ docker compose run --rm csp-agent
 
 ## 运行模式
 
-### 交互式调试（开发推荐）
+### 自动无头运行（生产用，推荐）
+
+```bash
+# 增量模式（默认）：只搜索新 API，几分钟完成
+docker compose run --rm csp-agent -p "/lead-scan nitrosamine"
+
+# 全量模式：先改配置，再运行（约 2-3 小时）
+echo '{"search_mode": "full"}' > config/search-config.json
+docker compose run --rm csp-agent -p "/lead-scan nitrosamine"
+```
+
+`-p` 模式（headless）下 Pi 不启动 TUI，直接执行 prompt 并退出。
+
+**执行流程**：
+1. Agent 读取 `search-config.json` 确认模式
+2. Agent 检查 FDA 缓存（有则跳过采集）
+3. Agent 调用 `scripts/run-pipeline.js` 自动完成搜索+报告
+4. Agent 输出结果摘要后退出
+
+### 交互式调试（开发用）
 
 ```bash
 docker compose run --rm csp-agent
@@ -74,14 +93,6 @@ docker compose run --rm csp-agent
 - `/lead-scan nitrosamine` — 执行完整 pipeline
 - 随时按 `Enter` 发送 steering 消息干预 Agent 行为
 - 遇到验证码时 Agent 会暂停并说明情况，等待你的指示
-
-### 自动无头运行（生产用）
-
-```bash
-docker compose run --rm csp-agent -p "/lead-scan nitrosamine"
-```
-
-`-p` 模式下 Pi 不启动 TUI，直接执行 prompt 并退出。遇到错误自动截图、跳过、继续下一个 API。
 
 ## 查看产出物
 
@@ -254,14 +265,16 @@ cat .pi/settings.json
 # 应包含 "prompts": ["prompts/"]
 ```
 
-### `git pull` 报 scripts/ 目录冲突
+### scripts/ 目录说明
 
-Agent 运行时会在 `scripts/` 下生成临时代码。`.gitignore` 已忽略该目录，如果仍有冲突：
-```bash
-git stash
-git pull
-git stash drop
-```
+`scripts/` 目录包含运维脚本，已纳入版本控制：
+- `run-pipeline.js` — **主入口**（Agent 自动调用）：场景感知的瘦编排器，串联 CT.gov→CDT→快照→报告
+- `reset-and-search.sh` — 从零全量重置（清缓存 + 双源重扫 + 报告），用法 `bash scripts/reset-and-search.sh nitrosamine`
+- `lib/` — 通用层（跨场景复用）：
+  - `sources.js` — CT.gov REST API 采集 + CDT 浏览器采集
+  - `enrichment.js` — 剂型检测（中英文）、产品名抽取
+  - `snapshot.js` — 运行快照 + 增量检测
+  - `report.js` — 通用报告渲染器（由场景的 `scenario.json` + `enrich.js` 驱动）
 
 ### browser.js 报 `MODULE_NOT_FOUND: playwright`
 
@@ -301,8 +314,18 @@ pi-csp-agent/
 │       ├── browser.js                 # Playwright 自动化脚本（双模式：本地 launch 或远程 connectOverCDP）
 │       └── cdt-search.js              # chinadrugtrials.org.cn 专用搜索脚本（搜索+翻页+详情提取）
 ├── scenarios/nitrosamine/
-│   ├── SKILL.md                       # 亚硝胺场景 pipeline（含双源搜索+药物分类+联系方式）
+│   ├── SKILL.md                       # 亚硝胺场景 pipeline（编排器，调用 scripts/ 执行）
+│   ├── scenario.json                  # 场景声明式配置（标题/表头列/CSP矩阵/缓存路径）
+│   ├── enrich.js                     # 场景专属 hooks（药物分类/CSP推荐/报告小标题）
 │   └── references/csp-recommendations.md  # CSP 产品推荐规则
+├── scripts/                           # 运维脚本（Agent 自动调用，已纳入版本控制）
+│   ├── run-pipeline.js                # ★ 主入口：场景感知瘦编排器（CT.gov + CDT + 报告）
+│   ├── reset-and-search.sh            # 从零全量重置脚本
+│   └── lib/                           # 通用层（跨场景复用）
+│       ├── sources.js                 # CT.gov REST + CDT 浏览器采集
+│       ├── enrichment.js              # 剂型检测 / 产品名抽取
+│       ├── snapshot.js                # 快照 + 增量检测
+│       └── report.js                  # 通用报告渲染器
 ├── prompts/lead-scan.md               # 入口命令 /lead-scan <scenario>
 ├── pi-home/                           # 容器内 piuser 的 HOME（自动生成，已 gitignore）
 └── output/

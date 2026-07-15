@@ -1,7 +1,7 @@
 {
   "providers": {
     "qwen": {
-      "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "baseUrl": "https://ws-a0xlypfxmjry2g7l.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
       "api": "openai-completions",
       "apiKey": "$DASHSCOPE_API_KEY",
       "compat": {
@@ -17,7 +17,7 @@
           "name": "Qwen 3.7 Max",
           "reasoning": true,
           "input": ["text"],
-          "contextWindow": 131072,
+          "contextWindow": 1000000,
           "maxTokens": 16384,
           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
         },
@@ -26,16 +26,16 @@
           "name": "Qwen 3.7 Plus",
           "reasoning": true,
           "input": ["text"],
-          "contextWindow": 131072,
+          "contextWindow": 1000000,
           "maxTokens": 16384,
           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
         },
         {
-          "id": "deepseek-v4-pro",
+          "id": "vanchin/deepseek-v4-pro",
           "name": "DeepSeek V4 Pro",
           "reasoning": true,
           "input": ["text"],
-          "contextWindow": 131072,
+          "contextWindow": 1000000,
           "maxTokens": 16384,
           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
         },
@@ -44,16 +44,16 @@
           "name": "DeepSeek V4 Flash",
           "reasoning": false,
           "input": ["text"],
-          "contextWindow": 131072,
-          "maxTokens": 8192,
+          "contextWindow": 1000000,
+          "maxTokens": 16384,
           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
         },
         {
-          "id": "glm-5.2",
+          "id": "ZHIPU/GLM-5.2",
           "name": "GLM 5.2",
           "reasoning": true,
           "input": ["text"],
-          "contextWindow": 131072,
+          "contextWindow": 1000000,
           "maxTokens": 16384,
           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
         },

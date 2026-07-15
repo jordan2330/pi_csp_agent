@@ -4,19 +4,34 @@ argument-hint: "<scenario>"
 ---
 执行 $1 场景的商机发掘扫描。
 
-1. 使用 /skill:$1 加载场景 skill，按其 SKILL.md 指令执行完整 pipeline
-2. 首先确保 browser-executor skill 已就绪（如未加载则先 /skill:browser-executor）
-3. **Phase 0**: 读取 `config/search-config.json`，检查 `search_mode`：
-   - `"full"` → 全量模式：重置所有搜索状态，重新搜索两个数据源。搜索完成后自动改回 `"incremental"`
-   - `"incremental"` → 增量模式：仅搜索未完成的 API × 数据源组合
-4. 按场景 SKILL.md 的阶段依次执行：
-   - Phase 1: FDA 数据采集与缓存
-   - Phase 2: 双源临床试验搜索（chinadrugtrials + ClinicalTrials.gov，两个来源独立跟踪）
-   - Phase 3: 报告生成（含企业联系方式、产品名称、药物分类）
-5. 如遇到网页加载失败或验证码：
-   - 交互模式：暂停并向用户说明情况，等待指示
-   - 自动模式（pi -p）：截图保存，记录错误，继续下一个API
-6. 完成后输出 output/CSP_Leads_Report.md 的路径，并简要总结新增商机数量
+## 执行流程
+
+1. 使用 /skill:$1 加载场景 skill
+2. 如未加载 browser-executor skill，先 /skill:browser-executor
+
+### Phase 0: 环境检查
+- 读取 `config/search-config.json`，确认搜索模式（full 或 incremental）
+- 检查 `config/fda_nitrosamines.json` 是否存在且非空
+
+### Phase 1: FDA 数据
+- 如果 FDA 缓存已存在（apis 数量 > 0），跳过采集，直接进入 Phase 2
+- 如果缓存不存在或为空，按 SKILL.md Phase 1 指引用浏览器抓取 FDA 页面，生成缓存文件
+
+### Phase 2+3: 搜索 + 报告（自动化）
+- **直接执行 pipeline 脚本**，不要手动逐个 API 搜索
+- 由于 CDT 浏览器搜索可能耗时 2-3 小时，必须使用**后台执行 + 轮询**：
+  ```bash
+  nohup node scripts/run-pipeline.js "$1" > /workspace/output/runs/pipeline.log 2>&1 &
+  ```
+- 每隔 2 分钟检查：`tail -5 /workspace/output/runs/pipeline.log` + `kill -0 <PID>` 判断是否完成
+- 如果待搜索 API 为 0（增量模式），pipeline 会秒级完成，可先同步尝试
+- 脚本自动完成：CT.gov REST API 搜索 → CDT 浏览器搜索 → 快照生成 → 报告生成
+- 全量模式下搜索完成会自动将 search_mode 改回 incremental
+
+### 完成后
+- 读取 `output/CSP_Leads_Report.md` 的概览部分，输出简要总结
+- 检查 `output/runs/errors.log`，汇报失败的 API（如有）
+- 报告文件路径：`output/CSP_Leads_Report.md`
 
 ## 代码安全约束
 
@@ -24,8 +39,3 @@ argument-hint: "<scenario>"
 - 禁止使用 while(true) 等无限循环
 - 每个 extract 步骤的输出必须是结构化 JSON
 - 单个 browser script 执行时间不超过 120 秒
-
-## 全量搜索触发方式
-
-编辑 `config/search-config.json`，将 `"search_mode"` 改为 `"full"`，然后执行 `/lead-scan nitrosamine`。
-首次上线部署时建议使用全量搜索，之后日常运行使用增量模式。
