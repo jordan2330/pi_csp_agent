@@ -1,6 +1,7 @@
 .env
 output/runs/
 node_modules/
+**/package-lock.json
 # /scripts/  # 运维脚本（全量搜索/报告生成），已纳入版本控制
 pi-home/
 *.log
@@ -9,3 +10,4 @@ docs/superpowers/
 test/
 /20260616_*.md
 /CSP.md
+/config/fda_nitrosamines.json
