@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-This is a Pi Coding Agent project for CSP (Aptar active packaging) sales lead discovery. The agent scrapes regulatory and clinical trial data, matches customer profiles, and generates Markdown lead reports.
+This is a Pi Coding Agent project for CSP (Aptar active packaging) sales lead discovery. The agent scrapes regulatory and clinical trial data, matches customer profiles, and generates Markdown lead reports. Data is stored in PostgreSQL, with a web app for lead lifecycle management (planned).
 
 ## LLM Configuration
 
@@ -20,26 +20,36 @@ This is a Pi Coding Agent project for CSP (Aptar active packaging) sales lead di
   - `scripts/cdt-search.js` — chinadrugtrials.org.cn 专用搜索脚本（增量游标 + 详情页提取）
 - `scenarios/` — Business scenario skills (nitrosamine, probiotics, IVD, etc.)
   - `scenarios/<name>/SKILL.md` — 场景指令（pipeline 编排）
-  - `scenarios/<name>/scenario.json` — 声明式配置（表头列、CSP推荐矩阵、缓存/报告路径）
+  - `scenarios/<name>/scenario.json` — 声明式配置（表头列、CSP推荐矩阵、报告路径）
   - `scenarios/<name>/enrich.js` — 场景专属 hooks（药物分类、CSP推荐、报告小标题等）
 - `scripts/` — Pipeline 自动化脚本
   - `run-pipeline.js` — 主编排器（Phase 2+3：双源搜索 → 快照 → 报告）
+  - `migrate-to-db.js` — 一次性迁移脚本（JSON → PostgreSQL）
   - `reset-and-search.sh` — 从零全量重置脚本
+  - `lib/db.js` — PostgreSQL 数据访问层（schema 初始化 + CRUD）
   - `lib/sources.js` — 数据源统一接口（CT.gov REST API + CDT 浏览器脚本）
   - `lib/enrichment.js` — 剂型检测（英文/中文）、产品名提取
   - `lib/snapshot.js` — 快照管理 + 增量检测
   - `lib/report.js` — 通用 Markdown 报告渲染器（由 scenario.json + enrich.js 驱动）
 - `prompts/` — Pi prompt templates (entry points like `/lead-scan`)
-- `config/` — Cached data and model configuration
+- `config/` — Configuration
   - `models.json` — LLM 模型配置
   - `api_translations.json` — API 英文名→中文名映射表
   - `search-config.json` — 搜索模式控制（full / incremental）
-  - `fda_nitrosamines.json` — FDA 缓存（运行时生成，不纳入版本控制）
 - `output/` — Generated reports and run snapshots
   - `CSP_Leads_Report.md` — 最终商机报告
-  - `runs/YYYY-MM-DD.json` — 运行快照（增量对比用）
+  - `runs/YYYY-MM-DD.json` — 运行快照（增量对比用，Phase 2 后迁移到 DB snapshots 表）
   - `runs/errors.log` — 错误日志
 - `pi-home/` — Pi 运行时主目录（Docker bind mount，含 sessions、auth 等，不纳入版本控制）
+
+## Database Architecture (v2)
+
+- **PostgreSQL** — 所有数据存储在 PostgreSQL 中，不再使用单文件 JSON 缓存
+- `DATABASE_URL` 环境变量配置连接（`postgresql://user:pass@host:5432/db`）
+- 核心表：`apis`（API元数据）、`search_state`（搜索游标）、`trials`（试验结果）、`snapshots`（快照）
+- Lead 生命周期表：`leads`、`visit_records`、`users`、`lead_statuses`（Web App 用）
+- **数据解耦**：FDA 元数据刷新不影响搜索游标和试验数据；全量搜索只清游标+试验，不碰 API 元数据
+- 多场景支持：所有表有 `scenario` 列，场景专属字段在 `apis.metadata` JSONB 列
 
 ## Key Conventions
 
@@ -47,7 +57,7 @@ This is a Pi Coding Agent project for CSP (Aptar active packaging) sales lead di
 - browser.js uses "script mode" (JSON step file) for multi-step browser interactions — each invocation is a separate process, so page state cannot persist across calls
 - Pipeline 核心逻辑在 `scripts/run-pipeline.js` 中，通过 `scenario.json` + `enrich.js` 实现场景无关化
 - Incremental detection: CT.gov 用 NCT ID 集合对比检测新增；CDT 用 `last_cdt_regno` 游标增量搜索，遇到旧数据自动停止翻页
-- FDA data is auto-refreshed each run (page updated quarterly by FDA)
+- 数据存储在 PostgreSQL 中，通过 `scripts/lib/db.js` 访问；搜索游标独立持久化，不随 FDA 数据刷新丢失
 - 容器以宿主机用户身份运行（entrypoint.sh 自动检测 UID，通过 gosu 降权）
 - 浏览器通过 `BROWSER_ENDPOINT` 环境变量连接远程 browserless（Docker 镜像不含 Chromium）
 

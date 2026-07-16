@@ -11,6 +11,7 @@ ENV NODE_PATH=/usr/local/lib/node_modules
 
 RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 RUN npm install -g playwright
+RUN npm install -g pg
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh

@@ -4,9 +4,30 @@ services:
     environment:
       - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY}
       - BROWSER_ENDPOINT=${BROWSER_ENDPOINT}
+      - DATABASE_URL=postgresql://csp:csp@db:5432/csp
     volumes:
       - .:/workspace
       - ./pi-home:/home/piuser
       - ./config/models.json:/home/piuser/.pi/agent/models.json:ro
+    depends_on:
+      db:
+        condition: service_healthy
     stdin_open: true
     tty: true
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=csp
+      - POSTGRES_PASSWORD=csp
+      - POSTGRES_DB=csp
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U csp"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pg-data:
