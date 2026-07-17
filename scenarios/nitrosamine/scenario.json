@@ -40,12 +40,12 @@
   "tables": {
     "new_leads": {
       "columns": [
-        { "header": "申请人", "key": "sponsor", "fmt": "truncate25" },
-        { "header": "产品名称", "key": "drugName", "fmt": "truncate20" },
+        { "header": "申请人", "key": "sponsor" },
+        { "header": "产品名称", "key": "drugName" },
         { "header": "剂型", "key": "dosageForm", "fmt": "formBadge" },
         { "header": "药物分类", "key": "drugClassification" },
         { "header": "试验状态", "key": "status" },
-        { "header": "适应症", "key": "indication", "fmt": "truncate25" },
+        { "header": "适应症", "key": "indication", "fmt": "truncate40" },
         { "header": "试验分期", "key": "phase" },
         { "header": "登记日期", "key": "regDate" },
         { "header": "联系方式", "key": "contact", "fmt": "formatContact" },
@@ -54,16 +54,16 @@
     },
     "full_leads": {
       "columns": [
-        { "header": "申请人", "key": "sponsor", "fmt": "truncate28" },
-        { "header": "产品名称", "key": "drugName", "fmt": "truncate18" },
+        { "header": "申请人", "key": "sponsor" },
+        { "header": "产品名称", "key": "drugName" },
         { "header": "剂型", "key": "dosageForm", "fmt": "formBadge" },
         { "header": "药物分类", "key": "drugClassification" },
         { "header": "联系人", "key": "contactName" },
         { "header": "电话", "key": "contactPhone" },
         { "header": "邮箱", "key": "contactEmail" },
-        { "header": "地址", "key": "contactAddress", "fmt": "truncate20" },
+        { "header": "地址", "key": "contactAddress" },
         { "header": "试验状态", "key": "status" },
-        { "header": "适应症", "key": "indication", "fmt": "truncate28" },
+        { "header": "适应症", "key": "indication", "fmt": "truncate40" },
         { "header": "分期", "key": "phase" },
         { "header": "来源", "key": "source" },
         { "header": "新增", "key": "isNew", "fmt": "newBadge" }

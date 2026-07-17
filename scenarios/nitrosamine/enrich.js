@@ -26,15 +26,24 @@ const originatorCompanies = new Set([
 
 // ── Drug classification inference ──
 function classifyTrial(trial) {
-  if (trial.phase === '其他-BE' || trial.phase === 'BE') return '仿制药';
+  const phase = trial.phase || '';
+  const trialType = trial.trialType || '';
   const sponsor = trial.sponsor || '';
+  const drugName = trial.drugName || '';
+
+  // ── 仿制药：生物等效性试验（BE）或一致性评价 ──
+  if (phase === '其他-BE' || phase === 'BE') return '仿制药';
+  if (/生物等效|生物利用度|一致性评价/.test(trialType)) return '仿制药';
+
+  // ── 原研药：原研企业 + 后期临床 ──
   const isOriginator = originatorCompanies.has(sponsor);
-  if (isOriginator && (trial.phase === 'III期' || trial.phase === 'IV期' ||
-      trial.phase === 'PHASE3' || trial.phase === 'PHASE4')) {
+  if (isOriginator && (phase === 'III期' || phase === 'IV期' ||
+      phase === 'PHASE3' || phase === 'PHASE4')) {
     return '原研药';
   }
-  if (trial.phase === 'I期' || trial.phase === 'PHASE1') {
-    const drugName = trial.drugName || '';
+
+  // ── 新药/改良新药：I期临床 ──
+  if (phase === 'I期' || phase === 'PHASE1') {
     if (drugName.includes('缓释') || drugName.includes('控释') || drugName.includes('肠溶') ||
         drugName.includes('新规格') || drugName.includes('改良')) {
       return '新药（改良型）';
@@ -43,6 +52,7 @@ function classifyTrial(trial) {
       return '新药';
     }
   }
+
   return null;
 }
 

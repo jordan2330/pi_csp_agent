@@ -1,0 +1,11 @@
+{
+  "_comment": "CDT 请求节奏控制。CDT 无反爬，限流来自 browserless 连接频率。持久连接模式只需控制页面间隔。",
+  "delay_between_apis_ms": [5000, 8000],
+  "delay_after_search_ms": [2000, 3000],
+  "delay_page_turn_ms": [2000, 3000],
+  "delay_after_page_load_ms": [2000, 3000],
+  "delay_detail_page_ms": [2000, 3000],
+  "delay_after_detail_load_ms": [2000, 3000],
+  "retry_429_base_ms": 15000,
+  "retry_429_max_ms": 90000
+}

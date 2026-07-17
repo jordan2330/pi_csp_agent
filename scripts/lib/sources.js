@@ -92,6 +92,7 @@ function ctgovToTrials(apiResult, apiName) {
     const ident = protocol.identificationModule || {};
     const status = protocol.statusModule || {};
     const design = protocol.designModule || {};
+    const conditionsMod = protocol.conditionsModule || {};
     // 注意：字段名是 sponsorCollaboratorsModule（单数），不是 sponsors
     const sponsorMod = protocol.sponsorCollaboratorsModule || {};
     const contactsMod = protocol.contactsLocationsModule || {};
@@ -127,15 +128,25 @@ function ctgovToTrials(apiResult, apiName) {
       }
     }
 
-    // ── 提取试验机构（中国试验点 facility 名称） ──
+    // ── 提取试验机构（中国试验点 facility 名称，最多2个） ──
     const chinaLocs = (contactsMod.locations || []).filter(l => l.country === 'China');
-    const piUnit = chinaLocs.map(l => l.facility || '').filter(Boolean).join('; ').substring(0, 300);
+    const piUnit = chinaLocs.slice(0, 2).map(l => l.facility || '').filter(Boolean).join('; ');
+
+    // ── 提取地址（中国试验点的 city/state/zip 拼接，最多2个） ──
+    const contactAddress = chinaLocs.slice(0, 2).map(l => {
+      const parts = [l.city, l.state, l.zip].filter(Boolean);
+      return parts.join(', ');
+    }).filter(Boolean).join('; ');
 
     // ── 使用 enrichment.js 提取产品名和剂型 ──
     const briefTitle = ident.briefTitle || '';
     const officialTitle = ident.officialTitle || '';
     const productName = extractProductName(interventions, apiName);
     const dosageForm = extractDosageForm(interventions, briefTitle, officialTitle);
+
+    // ── 试验分期和适应症 ──
+    const phase = (Array.isArray(design.phases) && design.phases.length > 0) ? design.phases.join(', ') : '';
+    const condition = (Array.isArray(conditionsMod.conditions) && conditionsMod.conditions.length > 0) ? conditionsMod.conditions.join('; ') : '';
 
     // ── 其他字段 ──
     const drugName = productName || apiName;
@@ -162,9 +173,12 @@ function ctgovToTrials(apiResult, apiName) {
       contactEmail: contactEmail,
       piName: '',
       piUnit: piUnit,
+      contactAddress: contactAddress,
       briefTitle: briefTitle,
       officialTitle: officialTitle,
       targetEnrollment: design.enrollmentInfo ? String(design.enrollmentInfo.count || '') : '',
+      phase: phase,
+      condition: condition,
       isNew: true
     };
   });
@@ -290,15 +304,18 @@ function mapTrial(t) {
     status: t.searchStatus || t.trialStatus || '',
     drugName: t.searchDrugName || t.drugName || '',
     dosageForm: '',
-    trialType: t.trialCategory || '',
+    trialType: [t.trialCategory, t.trialScope].filter(Boolean).join('; ') || '',
     contactName: t.contactName || '',
     contactPhone: t.contactPhone || '',
     contactEmail: t.contactEmail || '',
     piName: t.piName || '',
     piUnit: t.piUnit || '',
+    contactAddress: t.contactAddress || '',
     briefTitle: t.publicTitle || t.searchTitle || '',
     officialTitle: t.scientificTitle || '',
     targetEnrollment: t.targetEnrollment || '',
+    phase: t.trialPhase || '',
+    condition: t.indication || t.searchIndication || '',
     isNew: true
   };
 }
@@ -336,4 +353,63 @@ function httpGetJSON(url) {
   });
 }
 
-module.exports = { ctgovFetch, ctgovToTrials, runCDTSearch };
+// ══════════════════════════════════════════════════
+// CDT 持久连接搜索 (pipeline worker 模式)
+// ══════════════════════════════════════════════════
+
+/**
+ * 使用持久 browser 搜索单个 API (pipeline worker 专用)
+ *
+ * @param {Playwright Browser} browser - 持久浏览器连接
+ * @param {string} nameCN - API 中文名
+ * @param {object} opts
+ * @param {number} opts.maxPages - 最大翻页数
+ * @param {number} opts.minYear - 最小年份过滤
+ * @param {number} opts.batchSize - 详情页每批大小
+ * @param {string} opts.cursor - 增量游标
+ * @param {string} opts.logPrefix - 日志前缀 (如 "[W1]")
+ * @returns { trials, totalResults, filteredTotal, filterStats, newCursor }
+ */
+async function cdtSearchOneAPI(browser, nameCN, opts = {}) {
+  const { maxPages = 5, minYear = 0, batchSize = 50, cursor = '', logPrefix = '[CDT]' } = opts;
+  const cdtSearchLib = require(path.join(__dirname, '..', '..', 'skills', 'browser_executor', 'scripts', 'cdt-search-lib'));
+
+  const result = await cdtSearchLib.searchOneAPI(browser, nameCN, {
+    minYear,
+    cursor,
+    maxPages,
+    batchSize,
+    logPrefix
+  });
+
+  const trials = result.detailedTrials.map(mapTrial);
+
+  // 二次校验: 过滤掉任何 regNo 年份不符合 minYear 的结果
+  let postFilterRemoved = 0;
+  let filtered = trials;
+  if (minYear > 0 && filtered.length > 0) {
+    const before = filtered.length;
+    filtered = filtered.filter(t => {
+      const m = t.regNo.match(/CTR(\d{4})/i);
+      if (!m) return true;
+      return parseInt(m[1]) >= minYear;
+    });
+    postFilterRemoved = before - filtered.length;
+  }
+
+  return {
+    trials: filtered,
+    totalResults: result.totalResults,
+    filteredTotal: result.filteredTotal,
+    filterStats: {
+      total: result.totalResults,
+      filtered: result.filteredTotal,
+      year: minYear,
+      cursor: cursor || null,
+      postFilterRemoved: postFilterRemoved > 0 ? postFilterRemoved : undefined
+    },
+    newCursor: result.newCursor
+  };
+}
+
+module.exports = { ctgovFetch, ctgovToTrials, runCDTSearch, cdtSearchOneAPI };
