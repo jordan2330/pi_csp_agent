@@ -1,6 +1,1 @@
-{
-  "search_mode": "incremental",
-  "_comment_incremental": "增量模式: 所有API都参与搜索，使用 lastUpdate/last_cdt_regno 游标只获取新增数据",
-  "_comment_full": "全量模式: 重置所有游标，重新搜索全部API，完成后自动切回 incremental",
-  "_modes": ["incremental", "full"]
-}
+{"search_mode":"incremental"}

@@ -128,11 +128,70 @@ function isOralSolid(form) {
   return /口服固体|改良释放|口服固体制剂/.test(form);
 }
 
+// ── Enterprise filter (identify pharmaceutical companies vs hospitals/universities/individuals) ──
+// CDT 数据来自药企申报，默认全部为企业；CT.gov 申办方包含医院、大学、个人，需要过滤。
+const EN_ENTERPRISE_KW = [
+  'Pharma', 'Pharmaceutical', 'Bio', 'Biotech', 'Labs', 'Laboratories',
+  'Therapeutics', 'Inc', 'Ltd', 'LLC', 'Corp', 'Co.', 'Co,', 'GmbH',
+  'Medicines', 'Medicine', 'Healthcare', 'Life Sciences', 'Sciences', 'Technology',
+  'Company', 'Group'
+];
+const KNOWN_ENTERPRISES = new Set([
+  'AbbVie', 'AstraZeneca', 'Bayer', 'Boehringer Ingelheim',
+  'Bristol-Myers Squibb', 'Daiichi Sankyo', 'Eisai', 'Eli Lilly',
+  'Eli Lilly and Company', 'Gilead', 'GlaxoSmithKline',
+  'Johnson & Johnson', 'Merck', 'MSD', 'Novartis',
+  'Novartis Pharmaceuticals', 'Otsuka', 'Pfizer', 'Regeneron',
+  'Roche', 'Sanofi', 'Takeda', 'Vertex',
+  'SciClone Pharmaceuticals', 'BeiGene', 'Innovent Biologics',
+  'Hengrui Medicine', 'Hansoh Pharma', 'Akeso', 'Genmab',
+  'Hutchmed', 'Jemincare', 'Longbio Pharma', 'Vivalink', 'Amzell',
+  'Chiesi Farmaceutici S.p.A.', 'Inmunotek S.L.'
+]);
+
+function isEnterprise(sponsor) {
+  if (!sponsor || sponsor.length < 2) return false;
+  if (KNOWN_ENTERPRISES.has(sponsor)) return true;
+
+  if (/[\u4e00-\u9fff]/.test(sponsor)) {
+    // CN: enterprise keywords take priority (handles "XX制药研究院" etc.)
+    if (/制药|药业|医药|生物|药品|科技|股份|公司|集团|健康|医疗|生命/.test(sponsor)) return true;
+    // CN: clearly non-enterprise
+    if (/医院|大学|学院|研究所|研究院|中心|学校|学会|协会|基金|卫生|疾控/.test(sponsor)) return false;
+    return false; // Unknown Chinese entity → exclude from CT.gov
+  }
+
+  // EN: non-enterprise patterns first (prevents "Beijing University of Technology" false positive)
+  if (/University|College|Hospital|Clinic|Institute|Academy|School|Foundation|Center|Centre|Laboratory|Department of|Ministry of/i.test(sponsor)) return false;
+  // EN: enterprise keywords
+  if (EN_ENTERPRISE_KW.some(kw => sponsor.includes(kw))) return true;
+  // Individual name patterns (conservative: only exclude clear personal names)
+  if (/^([A-Z][a-z]+[- ]){1,2}[A-Z][a-z]+$/.test(sponsor)) return false;  // Bai-Rong Xia
+  if (/^[A-Z][a-z]+,\s*[A-Z]/.test(sponsor)) return false;               // Dai, Guanghai
+  if (/,\s*(MD|PhD|Dr|Professor|M\.D\.)/i.test(sponsor)) return false;   // kewen Chen,MD
+  if (/^[a-z]/.test(sponsor)) return false;                               // aijun xu, meishanshan
+  if (/^[A-Z][a-z]+$/.test(sponsor)) return false;                        // single word like "meishanshan"
+  if (/^[A-Z][a-z]+ [a-z]/.test(sponsor)) return false;                    // Qiu jinpeng, Wang wanxia
+  if (/^[A-Z][a-z]+-[a-z]+ [A-Z]/.test(sponsor)) return false;             // Xiao-dong Zhuang
+  if (/^[a-z]+[A-Z][a-z]*\s/.test(sponsor)) return false;                  // (lowercase prefix)
+  if (/^[A-Z][a-z]+[A-Z][a-z]+\s/.test(sponsor) && sponsor.split(/\s+/).length <= 2) return false; // YanYing Xiao (camelCase first name + last name)
+  if (/^[A-Z][a-z]+[A-Z][a-z]+$/.test(sponsor) && sponsor.length <= 10) return false; // WeiShi (camelCase pinyin)
+  return true; // Unknown English → include (conservative)
+}
+
+// ── Extract phase string from CT.gov designModule.phases array ──
+function extractPhaseFromCTGov(phasesArray) {
+  if (!Array.isArray(phasesArray) || phasesArray.length === 0) return '';
+  return phasesArray.join(', ');
+}
+
 module.exports = {
   detectDosageFormEn,
   extractProductName,
   extractDosageForm,
   extractDosageFormCN,
   resolveDosageForm,
-  isOralSolid
+  isOralSolid,
+  isEnterprise,
+  extractPhaseFromCTGov
 };

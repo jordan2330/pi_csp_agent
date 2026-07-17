@@ -153,7 +153,7 @@ node skills/browser_executor/scripts/browser.js script /tmp/fda-scrape.json
 
 **这是核心执行步骤。** FDA 数据就绪后，调用 pipeline 脚本。
 
-### 执行方式（重要：CDT 搜索可能耗时 2-3 小时）
+### 执行方式（重要：CDT 搜索可能耗时 1.5-2 小时）
 
 由于 CDT 浏览器搜索较慢，必须使用**后台执行 + 轮询**模式：
 
@@ -188,16 +188,23 @@ tail -20 /workspace/output/runs/pipeline.log
 - 日期过滤：仅保留 2 年内的试验
 - 每个 API 间隔 800ms，约 5-8 分钟完成全部 251 个 API
 
-#### Phase 2b: CDT 浏览器搜索
-- 调用 `skills/browser_executor/scripts/cdt-search.js` 逐 API 搜索
-- 用中文名搜索，提取：产品名称（drugName）、剂型（中文后缀识别）、企业联系方式
-- 每 API 参数：`--max-details 20 --max-pages 5`
-- 约 2-3 小时完成全部 251 个 API
+#### Phase 2b: CDT 浏览器搜索 (并发 worker + 持久连接)
+- 启动 2 个持久 browserless 浏览器连接（并发，避免 browserless 内存压力）
+- 每个 worker 为每个 API 创建独立 context+page，用完后关闭
+- 每 25 个 API 主动断开 WebSocket 重连（强制 Browserless 回收内存）
+- 将 235 个 API 均匀分配到 2 个 worker，并行搜索
+- 调用 `scripts/lib/sources.cdtSearchOneAPI()` → `skills/browser_executor/scripts/cdt-search-lib.js`
+- 用中文名搜索，提取：产品名称（drugName）、剂型（中文后缀识别）、试验分期、企业联系方式
+- 每 API 参数：`maxPages: 5, batchSize: 50`
+- API 间延迟: 5-8s（配置在 `config/cdt-throttle.json`）
+- 浏览器断连时自动重建 session 并重试，断连严重时 pipeline 层重连整个 browser
+- 约 1.5-2 小时完成全部 235 个 API（2 worker 并发，持久连接）
 
 #### Phase 3: 快照 + 报告
 - 从 `config/fda_nitrosamines.json` 生成快照到 `output/runs/YYYY-MM-DD.json`
 - 调用 `scripts/lib/report.js`（通用渲染器，由 `scenarios/nitrosamine/scenario.json` + `enrich.js` 驱动）生成 Markdown 报告
 - 报告输出到 `output/CSP_Leads_Report.md`
+- **增量模式报告只含新增商机**；全量商机列表仅在 `search_mode: full` 时输出
 
 ### 脚本退出码
 

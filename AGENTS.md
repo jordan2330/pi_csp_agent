@@ -60,3 +60,9 @@ This is a Pi Coding Agent project for CSP (Aptar active packaging) sales lead di
 - **Standalone scripts are acceptable ONLY as temporary dev tools.** If you create one, ask yourself: "Will the next run of `/lead-scan` automatically use this?" If not, you MUST update the SKILL.md.
 - **Before considering a task complete**, verify that the pipeline (SKILL.md + scripts/run-pipeline.js) produces the correct output end-to-end without manual intervention.
 - **Scenario-specific logic** belongs in `scenarios/<name>/scenario.json` (declarative) or `scenarios/<name>/enrich.js` (hooks), NOT in the generic `scripts/lib/` modules.
+
+## Report Output Rules
+
+- **增量模式 (`search_mode: incremental`)**: 报告只输出「新增商机」部分，不包含全量商机列表。全量数据过大，避免每次推送冗余内容。
+- **全量模式 (`search_mode: full`)**: 报告同时包含「新增商机」和「全量商机列表」。需要查看完整商机时使用此模式。
+- 此行为是项目设计约束，不可擅自修改。如需全量报告，临时设置 `search_mode: full` 后运行即可。

@@ -31,10 +31,15 @@ const OUTPUT_DIR = path.join(WS, 'output');
 const RUNS_DIR = path.join(OUTPUT_DIR, 'runs');
 const SEARCH_CONFIG = path.join(CONFIG_DIR, 'search-config.json');
 const ERR_LOG = path.join(RUNS_DIR, 'errors.log');
-const CDT_SCRIPT = path.join(WS, 'skills/browser_executor/scripts/cdt-search.js');
+const CDT_SEARCH_LIB = path.join(WS, 'skills/browser_executor/scripts/cdt-search-lib.js');
+const CDT_WORKER_COUNT = 2; // browserless 并发限制严格, 2 个 worker 更稳定; 每 25 个 API 主动重连回收内存
 
 const CTGOV_DELAY_MS = 800;
-const CDT_DELAY_MS = 3000;
+// CDT 节流配置: 从 config/cdt-throttle.json 读取
+const CDT_THROTTLE = (() => {
+  try { return JSON.parse(fs.readFileSync(path.join(WS, 'config', 'cdt-throttle.json'), 'utf8')); } catch { return { delay_between_apis_ms: [5000, 8000] }; }
+})();
+const CDT_DELAY_RANGE = CDT_THROTTLE.delay_between_apis_ms || [5000, 8000];
 const FDA_REFRESH_DAYS = 90;  // FDA 列表建议刷新周期
 const today = new Date();
 const todayStr = today.toISOString().slice(0, 10);
@@ -112,6 +117,31 @@ function phase1_checkFDA() {
   const versionField = scenarioConfig.cache_version_field;
   log(`缓存已加载: ${total} 个 API, 版本: ${fda[versionField] || 'unknown'} (${scenarioConfig.cache_file})`);
   return total;
+}
+
+
+// ══════════════════════════════════════════════════
+// 一次性迁移: CDT phase 数据回填
+// ══════════════════════════════════════════════════
+// 旧版 mapTrial 未映射 CDT trialPhase 字段，导致缓存中 CDT 商机的
+// phase 为空。此迁移从已有的 trialType 字段推断 phase。
+function migrate_cdtPhaseData() {
+  let migrated = 0;
+  for (const api of Object.values(fda.apis)) {
+    for (const t of (api.results || [])) {
+      if (t.source !== 'CDT') continue;
+      if (t.phase && t.phase.trim()) continue;
+      const tt = t.trialType || '';
+      if (/生物等效|生物利用度|BE/.test(tt)) {
+        t.phase = '其他-BE';
+        migrated++;
+      }
+    }
+  }
+  if (migrated > 0) {
+    saveFDA();
+    log(`📋 迁移: 回填 ${migrated} 条 CDT 商机的 phase 字段 (从 trialType 推断)`);
+  }
 }
 
 // ══════════════════════════════════════════════════
@@ -201,11 +231,13 @@ async function phase2a_ctgov(allApis, isFull) {
 }
 
 // ══════════════════════════════════════════════════
-// Phase 2b: CDT 浏览器搜索
+// Phase 2b: CDT 浏览器搜索 (并发 worker + 持久连接)
 // ══════════════════════════════════════════════════
-function phase2b_cdt(allApis, isFull) {
+async function phase2b_cdt(allApis, isFull) {
   log('');
-  log('═══ Phase 2b: CDT 浏览器搜索 ═══');
+  log('═══ Phase 2b: CDT 浏览器搜索 (并发 worker) ═══');
+
+  const cdtSearchLib = require(CDT_SEARCH_LIB);
 
   // ── 启动前清洗：移除缓存中任何年份不符的 CDT 结果（防御污染） ──
   const minYear = cutoff.getFullYear();
@@ -226,7 +258,6 @@ function phase2b_cdt(allApis, isFull) {
     }
   });
   if (sanitized > 0) {
-    // 被清洗的 API 重置游标，确保重新搜索
     Object.entries(fda.apis).forEach(([name, api]) => {
       const cdtResults = (api.results || []).filter(r => r.source === 'CDT');
       if (cdtResults.length === 0 && api.name_cn) {
@@ -240,7 +271,6 @@ function phase2b_cdt(allApis, isFull) {
   }
 
   if (isFull) {
-    // 全量模式: 重置所有 CDT 游标和结果
     Object.values(fda.apis).forEach(api => {
       api.last_cdt_regno = '';
       api.results = (api.results || []).filter(r => r.source !== 'CDT');
@@ -257,104 +287,210 @@ function phase2b_cdt(allApis, isFull) {
     if (!api.name_cn) { noChinese++; return; }
     if (api.last_cdt_regno) hasCursor++; else freshSearch++;
   });
-  log(`API 总数: ${allApis.length} | 模式: ${isFull ? '🔄 全量（重置游标）' : '📈 增量（regNo 游标）'}`);
+  log(`API 总数: ${allApis.length} | Worker 数: ${CDT_WORKER_COUNT} | 模式: ${isFull ? '🔄 全量（重置游标）' : '📈 增量（regNo 游标）'}`);
   log(`年份过滤: >= ${minYear} | 有游标: ${hasCursor} | 首次: ${freshSearch} | 无中文名: ${noChinese}`);
 
-  let done = 0, totalNewTrials = 0, withContact = 0, errors = 0;
-  let skippedNoNew = 0;  // 增量搜索返回 0 条新数据
+  // ── 创建持久浏览器 worker ──
+  log('正在创建持久浏览器连接...');
+  const browsers = [];
+  for (let w = 0; w < CDT_WORKER_COUNT; w++) {
+    try {
+      if (w > 0) await new Promise(r => setTimeout(r, 2000)); // 错开连接，避免压坱 browserless
+      const b = await cdtSearchLib.connectBrowser();
+      browsers.push(b);
+    } catch (e) {
+      log(`⚠️ Worker ${w + 1} 创建失败: ${e.message.substring(0, 100)}，使用 ${w} 个 worker 继续`);
+      break;
+    }
+  }
+  const workerCount = browsers.length;
+  if (workerCount === 0) {
+    log('❌ 无法创建任何浏览器连接，CDT 搜索中止');
+    return { done: 0, totalTrials: 0, errors: allApis.length, skippedNoNew: 0 };
+  }
+  log(`✅ 已创建 ${workerCount} 个持久浏览器连接`);
+
+  // ── 分配 API 到 workers ──
+  const workerApis = Array.from({ length: workerCount }, () => []);
+  let idx = 0;
+  for (const name of allApis) {
+    workerApis[idx % workerCount].push(name);
+    idx++;
+  }
+  for (let w = 0; w < workerCount; w++) {
+    log(`  Worker ${w + 1}: ${workerApis[w].length} APIs`);
+  }
+
+  // ── 并发进度计数器 (Node.js 单线程, ++ 安全) ──
+  let done = 0, totalNewTrials = 0, withContact = 0, errors = 0, skippedNoNew = 0;
   const t0cdt = Date.now();
 
-  for (let i = 0; i < allApis.length; i++) {
-    const name = allApis[i];
-    const api = fda.apis[name];
-    const nameCN = api.name_cn;
-    if (!nameCN) {
-      log(`  [${i + 1}] ${name}: 无中文名，跳过`);
-      done++;
-      continue;
+  // ── 重连浏览器 ──
+  async function reconnectBrowser(workerId) {
+    const prefix = `[W${workerId}]`;
+    const oldB = browsers[workerId - 1];
+    try { await oldB.close(); } catch (_) {}
+    log(`  ${prefix} 🔌 断开旧连接, 重连中...`);
+    await new Promise(r => setTimeout(r, 3000 + Math.random() * 3000));
+    const newB = await cdtSearchLib.connectBrowser();
+    browsers[workerId - 1] = newB;
+    return newB;
+  }
+
+  // ── 处理搜索结果 → 合并到缓存 ──
+  function mergeResults(api, cdtTrials, newCursor, minYear) {
+    const existingNonCDT = (api.results || []).filter(r => r.source !== 'CDT');
+    const existingCDT = (api.results || []).filter(r => r.source === 'CDT');
+    const existingRegNos = new Set(existingCDT.map(r => r.regNo));
+    const newTrials = cdtTrials.filter(t => !existingRegNos.has(t.regNo));
+
+    api.results = existingNonCDT.concat(existingCDT, newTrials);
+    api.lead_count = api.results.length;
+
+    if (newCursor && newCursor > (api.last_cdt_regno || '')) {
+      api.last_cdt_regno = newCursor;
     }
 
-    const cursor = api.last_cdt_regno || '';
-    const apiT0 = Date.now();
+    return newTrials;
+  }
 
-    try {
-      const { trials: cdtTrials, totalResults, filteredTotal, filterStats, newCursor } = sources.runCDTSearch(nameCN, CDT_SCRIPT, {
-        maxPages: 5, timeout: 1200000, minYear: minYear, batchSize: 50, cursor
-      });
+  // ── 主动重连周期 (每 25 个 API 断开重连，强制 Browserless 回收内存) ──
+  const RECONNECT_EVERY = 25;
 
-      // 二次校验告警
-      const oldRegNos = cdtTrials.filter(t => {
-        const m = t.regNo.match(/CTR(\d{4})/i);
-        return m && parseInt(m[1]) < minYear;
-      });
-      if (oldRegNos.length > 0) {
-        const samples = oldRegNos.slice(0, 3).map(t => t.regNo).join(', ');
-        log(`  ⚠️ ${name}(${nameCN}): 二次校验发现 ${oldRegNos.length} 条旧数据! [${samples}]`);
-        fs.appendFileSync(ERR_LOG, `[${new Date().toISOString()}] [CDT-VALIDATE] ${name}(${nameCN}): ${oldRegNos.length} old regNos post-filter: ${samples}\n`);
-      }
+  // ── Worker 函数 ──
+  async function runWorker(workerId, apiList, browser) {
+    const prefix = `[W${workerId}]`;
+    let apisSinceConnect = 0;
 
-      if (cursor && cdtTrials.length === 0) {
-        // 增量搜索无新增 → 跳过
-        skippedNoNew++;
+    for (const name of apiList) {
+      const api = fda.apis[name];
+      const nameCN = api.name_cn;
+      if (!nameCN) {
+        log(`  ${prefix} ${name}: 无中文名，跳过`);
         done++;
-        if (done % 10 === 0) {
-          const elapsed = ((Date.now() - t0cdt) / 60000).toFixed(1);
-          log(`  ── CDT 进度: ${done}/${allApis.length}, ${totalNewTrials} new, ${skippedNoNew} 无新增, ${errors} errors, ${elapsed}min ──`);
-        }
-        if (i < allApis.length - 1) {
-          execSync(`sleep ${(CDT_DELAY_MS / 1000).toFixed(1)}`, { stdio: 'pipe' });
-        }
         continue;
       }
 
-      // 有新增数据 → 追加到现有结果
-      const existingNonCDT = (api.results || []).filter(r => r.source !== 'CDT');
-      const existingCDT = (api.results || []).filter(r => r.source === 'CDT');
+      const cursor = api.last_cdt_regno || '';
+      const apiT0 = Date.now();
 
-      // CDT 数据不可变，直接追加（按 regNo 去重保险）
-      const existingRegNos = new Set(existingCDT.map(r => r.regNo));
-      const newTrials = cdtTrials.filter(t => !existingRegNos.has(t.regNo));
-
-      api.results = existingNonCDT.concat(existingCDT, newTrials);
-      api.lead_count = api.results.length;
-
-      // 更新游标
-      if (newCursor && newCursor > (api.last_cdt_regno || '')) {
-        api.last_cdt_regno = newCursor;
+      // ── 主动重连: 每 N 个 API 断开重连，回收 Browserless 内存 ──
+      if (apisSinceConnect >= RECONNECT_EVERY) {
+        browser = await reconnectBrowser(workerId);
+        apisSinceConnect = 0;
       }
 
-      totalNewTrials += newTrials.length;
-      const ct = newTrials.filter(t => t.contactPhone || t.contactEmail).length;
-      withContact += ct;
-
-      const apiSecs = ((Date.now() - apiT0) / 1000).toFixed(0);
-      if (newTrials.length > 0 || i % 10 === 0) {
-        const cursorInfo = cursor ? ` (cursor=${cursor})` : '';
-        const filterInfo = filterStats && filterStats.filterLog
-          ? ` (${filterStats.filterLog.before}→${filterStats.filterLog.after})`
-          : '';
-        log(`  [${i + 1}] ${name}(${nameCN}): ${totalResults}${filterInfo}→+${newTrials.length}${cursorInfo} [联系:${ct}] ${apiSecs}s`);
+      // ── 被动检查: 浏览器连接是否还活着 ──
+      if (browser.isConnected && !browser.isConnected()) {
+        log(`  ${prefix} ⚠️ 浏览器已断连 (被动检测): ${name}, 重连中...`);
+        browser = await reconnectBrowser(workerId);
+        apisSinceConnect = 0;
       }
-    } catch (e) {
-      fs.appendFileSync(ERR_LOG, `[${new Date().toISOString()}] [CDT] ${name}(${nameCN}): ${e.message.substring(0, 200)}\n`);
-      errors++;
-      if (errors <= 5) log(`  ✗ ${name}: ${e.message.substring(0, 100)}`);
-    }
 
-    done++;
-    saveFDA();
+      try {
+        const result = await sources.cdtSearchOneAPI(browser, nameCN, {
+          maxPages: 5, minYear, batchSize: 50, cursor, logPrefix: prefix
+        });
+        apisSinceConnect++;
 
-    if (done % 10 === 0) {
-      const elapsed = ((Date.now() - t0cdt) / 60000).toFixed(1);
-      const rate = done / (elapsed || 1);
-      const remaining = ((allApis.length - done) / rate).toFixed(0);
-      log(`  ── CDT 进度: ${done}/${allApis.length}, ${totalNewTrials} new, ${skippedNoNew} 无新增, ${errors} errors, ${elapsed}min, ~${remaining}min 剩余 ──`);
-    }
+        const { trials: cdtTrials, totalResults, filteredTotal, filterStats, newCursor } = result;
 
-    if (i < allApis.length - 1) {
-      const delay = CDT_DELAY_MS + Math.random() * 1000;
-      execSync(`sleep ${(delay / 1000).toFixed(1)}`, { stdio: 'pipe' });
+        // 二次校验告警
+        const oldRegNos = cdtTrials.filter(t => {
+          const m = t.regNo.match(/CTR(\d{4})/i);
+          return m && parseInt(m[1]) < minYear;
+        });
+        if (oldRegNos.length > 0) {
+          const samples = oldRegNos.slice(0, 3).map(t => t.regNo).join(', ');
+          log(`  ${prefix} ⚠️ ${name}(${nameCN}): ${oldRegNos.length} 条旧数据! [${samples}]`);
+          fs.appendFileSync(ERR_LOG, `[${new Date().toISOString()}] [CDT-VALIDATE] ${name}(${nameCN}): ${oldRegNos.length} old regNos\n`);
+        }
+
+        if (cursor && cdtTrials.length === 0) {
+          skippedNoNew++;
+        } else {
+          const newTrials = mergeResults(api, cdtTrials, newCursor, minYear);
+          totalNewTrials += newTrials.length;
+          const ct = newTrials.filter(t => t.contactPhone || t.contactEmail).length;
+          withContact += ct;
+
+          const apiSecs = ((Date.now() - apiT0) / 1000).toFixed(0);
+          const cursorInfo = cursor ? ` (cursor)` : '';
+          const filterInfo = filterStats && filterStats.filterLog
+            ? ` (${filterStats.filterLog.before}→${filterStats.filterLog.after})`
+            : '';
+          log(`  ${prefix} ${name}(${nameCN}): ${totalResults}${filterInfo}→+${newTrials.length}${cursorInfo} [联系:${ct}] ${apiSecs}s`);
+        }
+      } catch (e) {
+        const isDisconnect = cdtSearchLib.isBrowserDeadError
+          ? cdtSearchLib.isBrowserDeadError(e)
+          : /disconnect|closed|Target closed|connection|BROWSER_DISCONNECTED/i.test(e.message);
+
+        if (isDisconnect) {
+          // ── 浏览器断连 → 重连 + 重试一次 ──
+          log(`  ${prefix} ⚠️ 浏览器断连: ${name}(${nameCN}), 重连重试...`);
+          try {
+            browser = await reconnectBrowser(workerId);
+            apisSinceConnect = 0;
+
+            const retryResult = await sources.cdtSearchOneAPI(browser, nameCN, {
+              maxPages: 5, minYear, batchSize: 50, cursor, logPrefix: prefix
+            });
+            apisSinceConnect++;
+
+            const { trials: rt, newCursor: nc2 } = retryResult;
+            if (!(cursor && rt.length === 0)) {
+              const newTrials = mergeResults(api, rt, nc2, minYear);
+              totalNewTrials += newTrials.length;
+              withContact += newTrials.filter(t => t.contactPhone || t.contactEmail).length;
+            }
+            log(`  ${prefix} ${name}(${nameCN}): 重连后成功 ✅`);
+          } catch (re) {
+            errors++;
+            fs.appendFileSync(ERR_LOG, `[${new Date().toISOString()}] [CDT-RECONNECT-FAIL] ${name}(${nameCN}): ${re.message.substring(0, 200)}\n`);
+            log(`  ${prefix} ✗ ${name}: 重连失败: ${re.message.substring(0, 100)}`);
+          }
+        } else {
+          errors++;
+          apisSinceConnect++;
+          fs.appendFileSync(ERR_LOG, `[${new Date().toISOString()}] [CDT] ${name}(${nameCN}): ${e.message.substring(0, 200)}\n`);
+          if (errors <= 10) log(`  ${prefix} ✗ ${name}: ${e.message.substring(0, 100)}`);
+        }
+      }
+
+      done++;
+
+      // 每 10 个 API 保存一次缓存
+      if (done % 10 === 0) {
+        saveFDA();
+        const elapsed = ((Date.now() - t0cdt) / 60000).toFixed(1);
+        const rate = done / (elapsed || 1);
+        const remaining = ((allApis.length - done) / rate).toFixed(0);
+        log(`  ── CDT 进度: ${done}/${allApis.length}, ${totalNewTrials} new, ${skippedNoNew} 无新增, ${errors} errors, ${elapsed}min, ~${remaining}min 剩余 ──`);
+      }
+
+      // API 间延迟
+      await new Promise(r => setTimeout(r,
+        CDT_DELAY_RANGE[0] + Math.random() * (CDT_DELAY_RANGE[1] - CDT_DELAY_RANGE[0])
+      ));
     }
+  }
+
+  // ── 启动所有 worker (错开 3s 避免同时发请求) ──
+  const workerPromises = [];
+  for (let w = 0; w < workerCount; w++) {
+    workerPromises.push(
+      (async (delay) => {
+        if (delay > 0) await new Promise(r => setTimeout(r, delay));
+        return runWorker(w + 1, workerApis[w], browsers[w]);
+      })(w * 3000)
+    );
+  }
+  await Promise.all(workerPromises);
+
+  // ── 清理浏览器 ──
+  for (let w = 0; w < workerCount; w++) {
+    try { await browsers[w].close(); } catch (_) {}
   }
 
   saveFDA();
@@ -392,7 +528,7 @@ function phase3_report(isFull) {
   log(`快照已保存: ${snapFile}`);
 
   try {
-    const r = reportLib.generateReport(snapshot, scenario);
+    const r = reportLib.generateReport(snapshot, scenario, isFull);
     log(`报告已生成: ${r.outputPath}`);
     log(`统计: ${r.totalLeads} leads, ${r.totalNewLeads} new, ${r.apisWithLeadsCount} APIs with leads`);
   } catch (e) {
@@ -407,6 +543,8 @@ function phase3_report(isFull) {
 async function main() {
   const t0 = Date.now();
   ensureDir(RUNS_DIR);
+  // 每次运行清空 errors.log，避免跨运行累积
+  fs.writeFileSync(ERR_LOG, '');
 
   log('╔══════════════════════════════════════╗');
   log(`║   CSP Pipeline — 场景: ${scenarioName}`);
@@ -426,6 +564,9 @@ async function main() {
   // ── Phase 1: 缓存数据 ──
   phase1_checkFDA();
 
+  // ── 一次性迁移: CDT phase 数据回填 ──
+  migrate_cdtPhaseData();
+
   // ── Phase 0: FDA 列表年龄 ──
   const fdaStatus = phase0_checkFDAAge();
 
@@ -435,8 +576,8 @@ async function main() {
   // ── Phase 2a: CT.gov（所有 API，增量用 lastUpdate） ──
   const ctgovStats = await phase2a_ctgov(allApis, isFull);
 
-  // ── Phase 2b: CDT（所有 API，增量用 regNo 游标） ──
-  const cdtStats = phase2b_cdt(allApis, isFull);
+  // ── Phase 2b: CDT（所有 API，增量用 regNo 游标，并发 worker） ──
+  const cdtStats = await phase2b_cdt(allApis, isFull);
 
   // ── Phase 3: 快照 + 报告 ──
   phase3_report(isFull);

@@ -14,7 +14,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { resolveDosageForm, isOralSolid } = require('./enrichment');
+const { resolveDosageForm, isOralSolid, isEnterprise } = require('./enrichment');
 
 const WS = '/workspace';
 
@@ -29,7 +29,8 @@ function formatContact(t) {
   if (t.contactName) parts.push(t.contactName);
   if (t.contactPhone) parts.push(t.contactPhone);
   if (t.contactEmail) parts.push(t.contactEmail);
-  return parts.length > 0 ? truncate(parts.join(' / '), 45) : '-';
+  const full = parts.join(' / ');
+  return full.length > 80 ? full.substring(0, 79) + '…' : full;
 }
 
 function hasContact(t) {
@@ -72,6 +73,7 @@ function renderCell(col, t) {
   if (col.key === 'dosageForm') return formBadge(t.dosageForm);
   if (col.key === 'isNew') return t.isNew ? '🆕' : '';
   let v = t[col.key];
+  // Truncate indication and phase (user requirement)
   if (col.fmt && col.fmt.startsWith('truncate')) {
     return truncate(v, parseInt(col.fmt.slice(8), 10));
   }
@@ -97,7 +99,7 @@ function heading(api, tpl, config) {
 }
 
 // ── Main ──
-function generateReport(snapshot, scenario) {
+function generateReport(snapshot, scenario, isFull) {
   const { config, hooks } = scenario;
   const today = new Date().toISOString().slice(0, 10);
 
@@ -141,11 +143,17 @@ function generateReport(snapshot, scenario) {
   let totalNewLeads = 0;
 
   apisWithLeads.forEach(apiName => {
-    const trials = (filteredResults[apiName] || []).map(t => ({
+    const rawTrials = (filteredResults[apiName] || []).map(t => ({
       ...t,
       drugClassification: t.drugClassification || (hooks.classifyTrial ? hooks.classifyTrial(t) : null),
-      dosageForm: resolveDosageForm(t)
+      dosageForm: resolveDosageForm(t),
+      indication: t.indication || (t.source === 'CDT' ? t.briefTitle : (t.condition || t.briefTitle)) || '',
+      phase: t.phase || ''
     }));
+
+    // Enterprise filter: CDT trials are all pharma companies; CT.gov needs filtering
+    const trials = rawTrials.filter(t => t.source === 'CDT' || isEnterprise(t.sponsor));
+    if (trials.length === 0) return; // Skip API if no enterprise trials remain
 
     const info = apiInfo[apiName] || { name_cn: apiTranslations[apiName] || apiName, potency_category: 5, ai_limit: '1500 ng/day' };
     const newTrials = trials.filter(t => t.isNew);
@@ -232,17 +240,19 @@ function generateReport(snapshot, scenario) {
     });
   }
 
-  // Full leads section
-  md += '## ' + config.headings.full_leads_section + '\n\n';
-  config.category.order.filter(c => (byCat[c] || []).length > 0).forEach(cat => {
-    md += hooks.categoryHeader(cat, config) + '\n\n';
-    byCat[cat].forEach(api => {
-      md += '#### ' + heading(api, config.headings.full_lead_api, config) + '\n';
-      md += hooks.fullLeadSubtitle(api, config) + '\n\n';
-      md += renderTable(config.tables.full_leads.columns, sortTrialsCDTFirst(api.trials));
-      md += '\n';
+  // Full leads section: only in full mode (增量模式只输出新增商机，避免报告过大)
+  if (isFull) {
+    md += '## ' + config.headings.full_leads_section + '\n\n';
+    config.category.order.filter(c => (byCat[c] || []).length > 0).forEach(cat => {
+      md += hooks.categoryHeader(cat, config) + '\n\n';
+      byCat[cat].forEach(api => {
+        md += '#### ' + heading(api, config.headings.full_lead_api, config) + '\n';
+        md += hooks.fullLeadSubtitle(api, config) + '\n\n';
+        md += renderTable(config.tables.full_leads.columns, sortTrialsCDTFirst(api.trials));
+        md += '\n';
+      });
     });
-  });
+  }
 
   // ── Write report ──
   const outputPath = path.join(WS, config.report_file);
@@ -263,7 +273,13 @@ if (require.main === module) {
     process.exit(1);
   }
   const snap = JSON.parse(fs.readFileSync(snapFile, 'utf8'));
-  const r = generateReport(snap, { config, hooks });
+  // Read search mode to determine isFull
+  let isFull = false;
+  try {
+    const searchConfig = JSON.parse(fs.readFileSync(path.join(WS, 'config/search-config.json'), 'utf8'));
+    isFull = searchConfig.search_mode === 'full';
+  } catch (_) {}
+  const r = generateReport(snap, { config, hooks }, isFull);
   console.log('Report written:', r.outputPath);
   console.log(`Stats: ${r.totalLeads} leads, ${r.totalNewLeads} new, ${r.apisWithLeadsCount} APIs with leads`);
 }
