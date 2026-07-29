@@ -18,16 +18,16 @@
           "reasoning": true,
           "input": ["text"],
           "contextWindow": 1000000,
-          "maxTokens": 16384,
+          "maxTokens": 131072,
           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
         },
         {
           "id": "qwen3.7-plus",
           "name": "Qwen 3.7 Plus",
           "reasoning": true,
-          "input": ["text"],
+          "input": ["text", "image"],
           "contextWindow": 1000000,
-          "maxTokens": 16384,
+          "maxTokens": 65536,
           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
         },
         {
@@ -36,16 +36,16 @@
           "reasoning": true,
           "input": ["text"],
           "contextWindow": 1000000,
-          "maxTokens": 16384,
+          "maxTokens": 384000,
           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
         },
         {
           "id": "deepseek-v4-flash",
           "name": "DeepSeek V4 Flash",
-          "reasoning": false,
+          "reasoning": true,
           "input": ["text"],
           "contextWindow": 1000000,
-          "maxTokens": 16384,
+          "maxTokens": 384000,
           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
         },
         {
@@ -54,16 +54,16 @@
           "reasoning": true,
           "input": ["text"],
           "contextWindow": 1000000,
-          "maxTokens": 16384,
+          "maxTokens": 131072,
           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
         },
         {
           "id": "kimi-k2.6",
           "name": "Kimi K2.6",
           "reasoning": true,
-          "input": ["text"],
+          "input": ["text", "image"],
           "contextWindow": 262144,
-          "maxTokens": 16384,
+          "maxTokens": 262144,
           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
         }
       ]
