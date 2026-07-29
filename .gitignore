@@ -1,5 +1,6 @@
 .env
 output/runs/
+output/CSP_Leads_Report.md
 node_modules/
 **/package-lock.json
 # /scripts/  # 运维脚本（全量搜索/报告生成），已纳入版本控制
