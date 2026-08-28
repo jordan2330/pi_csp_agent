@@ -19,7 +19,19 @@ function trialKey(t) {
 
 // ── 加载前次快照的 results（用于增量对比） ──
 // 返回 { prevResults, prevSnapFile, prevSnapPath }；无前次快照则 prevResults={}
+// 同日二次运行：优先与当天已有快照对比，避免重复标记新增。
 function loadPrevResults(runsDir, todayStr) {
+  const todayPath = path.join(runsDir, todayStr + '.json');
+  if (fs.existsSync(todayPath)) {
+    try {
+      const prevSnap = JSON.parse(fs.readFileSync(todayPath, 'utf8'));
+      const prevResults = prevSnap.trials_data ? prevSnap.trials_data.results : {};
+      return { prevResults, prevSnapFile: todayStr + '.json', prevSnapPath: todayPath };
+    } catch (e) {
+      // 当天快照损坏则退回上一快照
+    }
+  }
+
   const snapFiles = fs.readdirSync(runsDir)
     .filter(f => f.endsWith('.json') && f !== todayStr + '.json')
     .sort().reverse();
@@ -110,7 +122,10 @@ function saveSnapshot({ fda, results, totalLeads, todayStr, runsDir, cacheVersio
   };
 
   const snapFile = path.join(runsDir, todayStr + '.json');
-  fs.writeFileSync(snapFile, JSON.stringify(snapshot, null, 2));
+  // 原子写：先写 tmp 再 rename，避免写入中断损坏快照
+  const tmpFile = snapFile + '.tmp';
+  fs.writeFileSync(tmpFile, JSON.stringify(snapshot, null, 2));
+  fs.renameSync(tmpFile, snapFile);
   return { snapshot, snapFile };
 }
 

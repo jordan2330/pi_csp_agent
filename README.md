@@ -130,7 +130,7 @@ nano config/search-config.json
 docker compose run --rm csp-agent -p "/lead-scan nitrosamine"
 ```
 
-全量搜索完成后会自动将 `search_mode` 改回 `"incremental"`。之后的日常运行只搜索新增/未完成的 API。
+全量搜索完成后会自动将 `search_mode` 改回 `"incremental"`。之后的日常运行每次仍遍历全部 API，但只增量拉取新增数据（CT.gov 全拉并与缓存对比，CDT 用 `last_cdt_regno` 游标续搜）。
 
 ### 双源搜索机制
 
@@ -144,7 +144,7 @@ docker compose run --rm csp-agent -p "/lead-scan nitrosamine"
   - **剂型**（从 Intervention.description + Title 关键词推断，提取率 31%）
   - 联系方式（centralContacts + Location.contacts，提取率 80%）
 
-两个来源独立跟踪搜索状态，互不影响。详见 `config/fda_nitrosamines.json` 中的 `searched_cdt` / `searched_ctgov` 字段。
+两个来源独立跟踪搜索状态，互不影响。CDT 增量的游标在 `config/fda_nitrosamines.json` 每 API 的 `last_cdt_regno` 字段中（登记号最大值，空串表示待全量）；CT.gov 不存游标，每次全量拉取后与缓存中的 NCT ID 对比检测新增。
 
 **CSP 重点关注剂型**：口服固体制剂（片剂/胶囊/颗粒）和改良释放制剂，报告中用 ⭐ 加粗高亮。
 

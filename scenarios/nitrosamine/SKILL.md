@@ -33,8 +33,8 @@ description: 亚硝胺药物商机发掘场景。从FDA页面抓取亚硝胺杂�
 }
 ```
 
-- **`"full"`**（全量模式）：重置所有 API 搜索状态，重新搜索两个数据源，完成后自动改回 `"incremental"`
-- **`"incremental"`**（增量模式，默认）：仅搜索未完成的 API × 数据源组合
+- **`"full"`**（全量模式）：重置所有 API 的搜索状态（CT.gov 缓存与 CDT 游标），重新搜索两个数据源，完成后自动改回 `"incremental"`
+- **`"incremental"`**（增量模式，默认）：每次运行仍遍历全部 API，但只增量拉取新增数据——CT.gov 每次全拉并与缓存 NCT ID 对比检测新增；CDT 用 `last_cdt_regno` 游标续搜，遇旧数据自动停止翻页
 
 ### 2. 检查 FDA 缓存
 
@@ -186,7 +186,7 @@ tail -20 /workspace/output/runs/pipeline.log
 - 每个 API 用英文名搜索，限定 `locStr=China`
 - 提取：产品名称（Intervention.name）、剂型（Intervention.description 推断）、联系方式（centralContacts + Location.contacts）
 - 日期过滤：仅保留 2 年内的试验
-- 每个 API 间隔 800ms，约 5-8 分钟完成全部 251 个 API
+- 每个 API 间隔 800ms，约 5-8 分钟完成全部 251 个 API（单次失败自动重试：超时/429/5xx 最多 3 次尝试，递增退避）
 
 #### Phase 2b: CDT 浏览器搜索 (并发 worker + 持久连接)
 - 启动 2 个持久 browserless 浏览器连接（并发，避免 browserless 内存压力）
@@ -201,6 +201,7 @@ tail -20 /workspace/output/runs/pipeline.log
 - 约 1.5-2 小时完成全部 235 个 API（2 worker 并发，持久连接）
 
 #### Phase 3: 快照 + 报告
+- **增量检测：对比前次快照标记 isNew；同日二次运行对比当天已有快照，避免重复汇报新增**
 - 从 `config/fda_nitrosamines.json` 生成快照到 `output/runs/YYYY-MM-DD.json`
 - 调用 `scripts/lib/report.js`（通用渲染器，由 `scenarios/nitrosamine/scenario.json` + `enrich.js` 驱动）生成 Markdown 报告
 - 报告输出到 `output/CSP_Leads_Report.md`

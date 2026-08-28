@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * chinadrugtrials.org.cn 搜索脚本（CLI 独立版）
+ * chinadrugtrials.org.cn 搜索脚本（CLI 独立调试工具）
  *
- * 独立 CLI 用法（向后兼容）: node cdt-search.js <API中文名> [输出文件路径] [选项]
+ * CLI 用法（调试/验证用）: node cdt-search.js <API中文名> [输出文件路径] [选项]
  *
  * 核心搜索逻辑在 cdt-search-lib.js 中，本文件只是 CLI 包装。
  * Pipeline 并发模式不使用此脚本，而是直接 require('cdt-search-lib')。
@@ -12,8 +12,8 @@
  *   --cursor REGNO   增量游标: 只获取 regNo > REGNO 的新数据，遇到旧数据自动停止翻页
  *   --max-pages N    限制最大翻页数 (默认10)
  *   --max-details N  限制最大详情获取数 (默认0=不限)
- *   --offset N       详情页起始偏移量 (默认0)
- *   --limit N        每批详情页数量 (默认0=全部)
+ *   --offset N       结果切片起始下标（搜索后应用，不减少搜索量，仅调试用）
+ *   --limit N        结果切片条数（同 offset，仅调试用）
  */
 
 const fs = require('fs');

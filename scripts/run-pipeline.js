@@ -72,7 +72,12 @@ const reportLib = require(path.join(__dirname, 'lib/report.js'));
 
 let fda;
 function loadFDA() { return JSON.parse(fs.readFileSync(FDA_FILE, 'utf8')); }
-function saveFDA() { fs.writeFileSync(FDA_FILE, JSON.stringify(fda, null, 2)); }
+// 原子写：先写 tmp 再 rename，避免长时任务中断损坏核心缓存
+function saveFDA() {
+  const tmpFile = FDA_FILE + '.tmp';
+  fs.writeFileSync(tmpFile, JSON.stringify(fda, null, 2));
+  fs.renameSync(tmpFile, FDA_FILE);
+}
 
 // ══════════════════════════════════════════════════
 // Phase 0: FDA 列表年龄检查
@@ -183,7 +188,12 @@ async function phase2a_ctgov(allApis, isFull) {
       const existingNctIds = new Set(existingCTGov.map(r => r.regNo));
 
       const newTrials = filtered.filter(t => !existingNctIds.has(t.regNo));
-      const updatedOrSame = filtered.filter(t => existingNctIds.has(t.regNo));
+
+      // 统计累计：不管是否有变化都要计入，避免总结数字偏小误导
+      totalStudies += filtered.length;
+      withContact += filtered.filter(t => t.contactPhone || t.contactEmail).length;
+      withDrugName += filtered.filter(t => t.drugName).length;
+      withForm += filtered.filter(t => t.dosageForm).length;
 
       if (newTrials.length === 0 && existingCTGov.length === filtered.length) {
         // 完全无变化
@@ -200,15 +210,11 @@ async function phase2a_ctgov(allApis, isFull) {
       api.results = existingCDT.concat(filtered);
       api.lead_count = api.results.length;
 
-      totalStudies += filtered.length;
       totalNew += newTrials.length;
-      withContact += filtered.filter(t => t.contactPhone || t.contactEmail).length;
-      withDrugName += filtered.filter(t => t.drugName).length;
-      withForm += filtered.filter(t => t.dosageForm).length;
 
       if (newTrials.length > 0 || i % 25 === 0) {
         const newInfo = newTrials.length > 0 ? ` (+${newTrials.length}新)` : '';
-        log(`  [${i + 1}] ${name}: ${result.totalCount}→${allTrials.length}(中国)→${filtered.length}(2年)${newInfo} [联系:${withContact}]`);
+        log(`  [${i + 1}] ${name}: ${result.fetchedCount}→${allTrials.length}(中国)→${filtered.length}(2年)${newInfo}`);
       }
     } catch (e) {
       fs.appendFileSync(ERR_LOG, `[${new Date().toISOString()}] [CT.gov] ${name}: ${e.message.substring(0, 200)}\n`);

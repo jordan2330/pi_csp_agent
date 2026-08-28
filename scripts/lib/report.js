@@ -68,16 +68,21 @@ function sortTrialsCDTFirst(trials) {
 }
 
 // ── Cell renderer ──
+// 转义 | 和换行，防止标题/地址中的特殊字符撑破 Markdown 表格
+function escapeCell(s) {
+  return String(s).replace(/\|/g, '\|').replace(/\r?\n/g, ' ');
+}
+
 function renderCell(col, t) {
-  if (col.key === 'contact') return formatContact(t);
+  if (col.key === 'contact') return escapeCell(formatContact(t));
   if (col.key === 'dosageForm') return formBadge(t.dosageForm);
   if (col.key === 'isNew') return t.isNew ? '🆕' : '';
   let v = t[col.key];
   // Truncate indication and phase (user requirement)
   if (col.fmt && col.fmt.startsWith('truncate')) {
-    return truncate(v, parseInt(col.fmt.slice(8), 10));
+    return escapeCell(truncate(v, parseInt(col.fmt.slice(8), 10)));
   }
-  return (v === undefined || v === null || v === '') ? '-' : String(v);
+  return escapeCell((v === undefined || v === null || v === '') ? '-' : String(v));
 }
 
 function renderTable(columns, trials) {

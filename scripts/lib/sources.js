@@ -13,7 +13,6 @@
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
-const { spawnSync } = require('child_process');
 const { extractProductName, extractDosageForm } = require('./enrichment');
 
 // ══════════════════════════════════════════════════
@@ -58,7 +57,7 @@ async function ctgovFetch(apiName) {
   } while (nextPageToken);
 
   return {
-    totalCount: allStudies.length,
+    fetchedCount: allStudies.length,
     studies: allStudies
   };
 }
@@ -188,113 +187,7 @@ function ctgovToTrials(apiResult, apiName) {
 // CDT (chinadrugtrials.org.cn) — 浏览器脚本
 // ══════════════════════════════════════════════════
 
-/**
- * 执行 cdt-search.js 获取 CDT 试验数据
- *
- * 支持增量: 传入 cursor 则 cdt-search.js 会在翻页时自动检测:
- *   - 遇到某页最大 regNo <= cursor → 停止翻页（后面全是旧数据）
- *   - 只获取 regNo > cursor 的新数据
- *   - 返回 newCursor 供下次使用
- *
- * 批量获取详情: 通过 batchSize 分批调用 cdt-search.js
- *   每次调用是独立进程，避免单进程超时
- *
- * @param {string} nameCN - API 中文名
- * @param {string} cdtScriptPath - cdt-search.js 路径
- * @param {object} opts
- * @param {number} opts.maxPages - 最大翻页数
- * @param {number} opts.timeout - 单次执行超时(ms)
- * @param {number} opts.minYear - 最小年份过滤
- * @param {number} opts.batchSize - 每批详情数
- * @param {string} opts.cursor - 增量游标 (regNo)，传入则只获取更新的数据
- * @returns { trials, totalResults, filteredTotal, filterStats, newCursor }
- */
-function runCDTSearch(nameCN, cdtScriptPath, opts = {}) {
-  const { maxPages = 5, timeout = 1200000, minYear = 0, batchSize = 50, cursor = '' } = opts;
-
-  let allTrials = [];
-  let totalResults = 0;
-  let filteredTotal = 0;
-  let offset = 0;
-  let newCursor = cursor || '';
-
-  let filterStats = { total: 0, filtered: 0, year: minYear, cursor: cursor || null };
-
-  while (true) {
-    const tmpFile = `/tmp/cdt-${Date.now()}-${offset}.json`;
-    let cmd = `node "${cdtScriptPath}" "${nameCN}" "${tmpFile}" --max-pages ${maxPages} --offset ${offset} --limit ${batchSize}`;
-    if (minYear > 0) cmd += ` --min-year ${minYear}`;
-    if (cursor) cmd += ` --cursor ${cursor}`;
-
-    const spawn = spawnSync('/bin/sh', ['-c', cmd], {
-      timeout,
-      maxBuffer: 50 * 1024 * 1024,
-      encoding: 'utf-8'
-    });
-    if (spawn.error) {
-      throw new Error(`cdt-search.js 执行失败: ${spawn.error.message}`);
-    }
-    if (spawn.status !== 0) {
-      const stderrInfo = (spawn.stderr || '').substring(0, 300);
-      throw new Error(`cdt-search.js 退出码 ${spawn.status}: ${stderrInfo}`);
-    }
-    const stderrText = spawn.stderr || '';
-
-    if (!fs.existsSync(tmpFile)) break;
-
-    let cdtData;
-    try {
-      cdtData = JSON.parse(fs.readFileSync(tmpFile, 'utf8'));
-    } finally {
-      try { fs.unlinkSync(tmpFile); } catch (_) { /* ignore */ }
-    }
-
-    if (offset === 0) {
-      totalResults = cdtData.totalResults || 0;
-      filteredTotal = cdtData.filteredTotal || 0;
-      // 从 stderr 解析年份过滤信息
-      const filterMatch = stderrText.match(/年份过滤\(>=(\d+)\):\s*(\d+)\s*→\s*(\d+)/);
-      filterStats = {
-        total: cdtData.extractedResults || totalResults,
-        filtered: filteredTotal,
-        year: minYear,
-        cursor: cursor || null,
-        filterLog: filterMatch ? { before: +filterMatch[2], after: +filterMatch[3] } : null
-      };
-    }
-
-    // 更新游标
-    if (cdtData.newCursor && cdtData.newCursor > newCursor) {
-      newCursor = cdtData.newCursor;
-    }
-
-    const batchTrials = (cdtData.detailedTrials || []);
-    allTrials = allTrials.concat(batchTrials.map(mapTrial));
-
-    // 如果本批不足 batchSize，说明已取完
-    if (batchTrials.length < batchSize) break;
-
-    offset += batchSize;
-    if (offset >= filteredTotal) break;
-  }
-
-  // ── 二次校验：过滤掉任何 regNo 年份不符合 minYear 的结果 ──
-  if (minYear > 0 && allTrials.length > 0) {
-    const before = allTrials.length;
-    allTrials = allTrials.filter(t => {
-      const m = t.regNo.match(/CTR(\d{4})/i);
-      if (!m) return true;
-      return parseInt(m[1]) >= minYear;
-    });
-    const removed = before - allTrials.length;
-    if (removed > 0) {
-      filterStats.postFilterRemoved = removed;
-    }
-  }
-
-  return { trials: allTrials, totalResults, filteredTotal, filterStats, newCursor };
-}
-
+// 试验数据映射（cdtSearchOneAPI 使用）
 function mapTrial(t) {
   return {
     source: 'CDT',
@@ -324,7 +217,8 @@ function mapTrial(t) {
 // HTTP 工具
 // ══════════════════════════════════════════════════
 
-function httpGetJSON(url) {
+// ── 单次 GET ──
+function httpGetOnce(url) {
   return new Promise((resolve, reject) => {
     const req = https.get(url, {
       timeout: CTGOV_TIMEOUT_MS,
@@ -351,6 +245,24 @@ function httpGetJSON(url) {
       reject(new Error('Request timeout'));
     });
   });
+}
+
+// ── 带重试的 GET：超时/429/5xx 重试两次（递增退避），其余错误直接失败 ──
+// 注意: 不设 Accept-Encoding — 裸 https 不自动解压 gzip
+async function httpGetJSON(url) {
+  const MAX_ATTEMPTS = 3;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await httpGetOnce(url);
+    } catch (err) {
+      const retryable = /timeout|HTTP 429|HTTP 5\d\d|ECONNRESET|ETIMEDOUT|socket hang up/i.test(err.message);
+      if (attempt < MAX_ATTEMPTS && retryable) {
+        await new Promise(r => setTimeout(r, 1000 * attempt));
+      } else {
+        throw err;
+      }
+    }
+  }
 }
 
 // ══════════════════════════════════════════════════
@@ -412,4 +324,4 @@ async function cdtSearchOneAPI(browser, nameCN, opts = {}) {
   };
 }
 
-module.exports = { ctgovFetch, ctgovToTrials, runCDTSearch, cdtSearchOneAPI };
+module.exports = { ctgovFetch, ctgovToTrials, cdtSearchOneAPI };

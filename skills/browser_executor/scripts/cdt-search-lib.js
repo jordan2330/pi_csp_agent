@@ -27,7 +27,7 @@ const THROTTLE_DEFAULTS = {
 function loadThrottle() {
   try {
     const cfg = JSON.parse(fs.readFileSync(
-      path.join(__dirname, '..', '..', 'config', 'cdt-throttle.json'), 'utf8'));
+      path.join(__dirname, '..', '..', '..', 'config', 'cdt-throttle.json'), 'utf8'));
     return { ...THROTTLE_DEFAULTS, ...cfg };
   } catch { return { ...THROTTLE_DEFAULTS }; }
 }

@@ -179,12 +179,6 @@ function isEnterprise(sponsor) {
   return true; // Unknown English → include (conservative)
 }
 
-// ── Extract phase string from CT.gov designModule.phases array ──
-function extractPhaseFromCTGov(phasesArray) {
-  if (!Array.isArray(phasesArray) || phasesArray.length === 0) return '';
-  return phasesArray.join(', ');
-}
-
 module.exports = {
   detectDosageFormEn,
   extractProductName,
@@ -192,6 +186,5 @@ module.exports = {
   extractDosageFormCN,
   resolveDosageForm,
   isOralSolid,
-  isEnterprise,
-  extractPhaseFromCTGov
+  isEnterprise
 };
