@@ -85,3 +85,21 @@
 | #5 | v1.2 commit | `cdt-search-lib.js` `isBrowserDeadError()` + 重连 |
 | #6 | v1 架构 | `run-pipeline.js` / `sources.js` 增量注释 |
 | #11 | v1.4 commit | `.pi/settings.json` |
+## 附录 B：Schema 决策（2026-08-31 grilling 锁定）
+
+| 决策 | 内容 |
+|------|------|
+| trial 唯一键 | `(source, regNo)`（**不含 API**；858 个唯一试验中 411 个命中多 API，同一 NCT 最多挂 5 个 API，复方药 drugName 含多搜索词） |
+| trial ↔ API | M2M：`trial_apis(trial_id, api)`；API 是命中关系不是归属；trial→scenario 由"命中该场景的 API 列表"派生 |
+| lead 唯一键 | `(scenario, sponsor, 产品)` —— 同一个 sponsor+产品在不同场景是两个 lead（CSP 推荐矩阵/推送/看板均场景化） |
+| lead ↔ trial | 1:N（lead 挂 0..N 条试验，UI 展开显示；试验分期/终止重做滚入同一 lead） |
+| reported_at | **挂 lead 不挂 trial**（trial 只留 `first_seen_at`，不背业务状态）；"新增" = `leads.reported_at IS NULL` |
+| 首轮静默 | 基线 = 对某场景的 leads 执行 `UPDATE ... SET reported_at=now WHERE reported_at IS NULL`；同一条语句复用三个场景：冷启动首轮、新场景首轮、单条重新推送 |
+| 新增粒度 | **lead 级**：已有 lead 下新增试验 = 子行 +1，不再算"新商机"（修正 v1 的 trial 级 isNew 恶习） |
+| 幂等 | upsert 按 (source, regNo) / (scenario, sponsor, 产品)，重复运行不得重置 reported_at |
+
+## 附录 C：Milestone 0 验收方式（黄金 fixture）
+
+- golden fixture：`docs/fixtures/ctgov-golden-2026-08-28.json`（1398 记录/858 唯一试验，v1.4 完整运行产物；CDT 当天 browserless 失败，残留数据不作基线）
+- 验收四条（全部离线、确定性）：① 字段保真往返 ② upsert 幂等 ③ reported_at 基线 ④ 游标持久化
+- CT.gov 集合对拍：只比"窗口交集内 NCT 集合"，**禁止计数相等对拍**（日期窗口随运行日平移）
