@@ -1,4 +1,4 @@
 {
-  "skills": ["skills/", "scenarios/"],
-  "prompts": ["prompts/"]
+  "skills": ["../skills/", "../scenarios/"],
+  "prompts": ["../prompts/"]
 }
