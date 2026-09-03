@@ -122,3 +122,10 @@
 - **Company 列** = 该 email 关联试验中 **regDate 最新**的 sponsor
 - **无 email 的 trial**：不导出，web 展示"缺 email 清单"供 BD 人工补（CT.gov 约 25% 无 email，CDT 100% 有）
 - **采集验收标准新增**：CDT/CT.gov 采集必须含 contactEmail；CDT 实测 100% 有 email（514 唯一），CT.gov 75%（535 唯一），CT.gov 无 email 的试验导出时该行降级（不生成 SF lead 行或标记 pending）
+
+## 附录 E：web 定位修正（2026-09-03）
+
+web = 人工审核台 + 导出器，权限简单（BD 用）：
+- **编辑/补全**：BD 可修改 trial 的 email/电话/姓名等字段（补全 25% 无 email 的 CT.gov 试验）；补的值存 DB，成为后续导出的复用资产
+- **人工选择是否导出**：导出不是自动的；BD 审核后勾选
+- **毙掉/恢复**：BD 可标记无希望 lead（可逆，可恢复）
