@@ -103,3 +103,19 @@
 - golden fixture：`docs/fixtures/ctgov-golden-2026-08-28.json`（1398 记录/858 唯一试验，v1.4 完整运行产物；CDT 当天 browserless 失败，残留数据不作基线）
 - 验收四条（全部离线、确定性）：① 字段保真往返 ② upsert 幂等 ③ reported_at 基线 ④ 游标持久化
 - CT.gov 集合对拍：只比"窗口交集内 NCT 集合"，**禁止计数相等对拍**（日期窗口随运行日平移）
+
+## 附录 D：方向修正（2026-09-03 grilling 锁定）
+
+2026-09-03 业务决定：**lead 生命周期全部由 Salesforce 管理**，agent 职责收窄为 采集 → 持久化 → 导出（Excel 供手工导入 SF）。
+
+### 作废/修正
+- 附录 B 中 **lead 聚合概念整体作废**（无 lead 表、无 (scenario, sponsor, 产品) 键、无 reported_at 挂 lead）
+- 作废：站内看板/认领/超时提醒/停滞标记/企微推送等全部生命周期功能（SF 负责）
+- 首轮静默概念**保留但改挂 trial 级**：`trials.first_seen_at` 用于导出增量，无 reported_at
+
+### 新定（2026-09-03）
+- **DB 只存 trials**：`trials(source, regNo)` 唯一 + `trial_apis` M2M（不变）+ 全部采集字段含 contactEmail/Phone/Name
+- **导出即聚合**：导出层按 email 动态聚合（DB 无预聚合实体）；SF lead 行 = 一个唯一 email 的容器，Description 聚合该 email 下全部试验详情
+- **SF 判重只认 email**（Salesforce 侧）：DB 入库去重 = (source, regNo)，**不沿用** SF 的 email 判重逻辑；同一 email 可出现在多条试验下，入库不合并
+- **导出增量** = `trials.first_seen_at` 过滤（"上次导出后新增的 trial"）
+- **采集验收标准新增**：CDT/CT.gov 采集必须含 contactEmail；CDT 实测 100% 有 email（514 唯一），CT.gov 75%（535 唯一），CT.gov 无 email 的试验导出时该行降级（不生成 SF lead 行或标记 pending）
