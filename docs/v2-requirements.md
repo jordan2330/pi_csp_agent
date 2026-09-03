@@ -141,3 +141,9 @@ web = 人工审核台 + 导出器，权限简单（BD 用）：
 
 - web 审核台 = **Node + Express + better-sqlite3 + 服务端渲染**（原生 HTML/CSS、少量 JS、移动端自适应），Excel 导出用 exceljs（Node 侧生成，与 pipeline 同栈）；不引入前端框架/构建链/第二种语言
 - **要登录**：users 表 + 会话，简单权限（BD 用），不做复杂 RBAC
+
+## 附录 G：FDA 持久化 + 周报 + 邮件（2026-09-03）
+
+- **FDA 数据进 DB**：apis 表（含 fda_page_version），**表设计预留中/英文字段**（en_name + cn_name，翻译来源 = v1 的 api_translations.json，融合进 DB）；FDA 是采集输入且季度更新，但按老板要求持久化
+- **周报保留，投递升级**：每周一早上自动生成 MD 报告并 **SMTP 邮件发送**（老板习惯）；v2 需新增邮件通道（v1 无此能力，靠人工/外部发送）；SMTP 配置入 .env
+- 周报口径待定：见下轮
