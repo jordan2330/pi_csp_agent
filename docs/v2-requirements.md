@@ -117,5 +117,8 @@
 - **DB 只存 trials**：`trials(source, regNo)` 唯一 + `trial_apis` M2M（不变）+ 全部采集字段含 contactEmail/Phone/Name
 - **导出即聚合**：导出层按 email 动态聚合（DB 无预聚合实体）；SF lead 行 = 一个唯一 email 的容器，Description 聚合该 email 下全部试验详情
 - **SF 判重只认 email**（Salesforce 侧）：DB 入库去重 = (source, regNo)，**不沿用** SF 的 email 判重逻辑；同一 email 可出现在多条试验下，入库不合并
-- **导出增量** = `trials.first_seen_at` 过滤（"上次导出后新增的 trial"）
+- **导出增量 = email 级**（SF 判重只认 email 且重复被拒 → 主路径）：`exported_emails(email, exported_at)` 表记录已导出 email；导出列表 = "该 email 从未导出过"的 email 聚合行。**禁止 trial 级增量**（老 email 的新 trial 整行会被 SF 吞掉，BD 无法区分真假成功）
+- **姓名拆分**：按最后一个空格拆（英文名），中文名整名进 Last Name、First Name 填 "."（SF 判重只看 email，姓名准确性不影响导入）
+- **Company 列** = 该 email 关联试验中 **regDate 最新**的 sponsor
+- **无 email 的 trial**：不导出，web 展示"缺 email 清单"供 BD 人工补（CT.gov 约 25% 无 email，CDT 100% 有）
 - **采集验收标准新增**：CDT/CT.gov 采集必须含 contactEmail；CDT 实测 100% 有 email（514 唯一），CT.gov 75%（535 唯一），CT.gov 无 email 的试验导出时该行降级（不生成 SF lead 行或标记 pending）
