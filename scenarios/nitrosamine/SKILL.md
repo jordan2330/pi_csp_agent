@@ -5,6 +5,26 @@ description: 亚硝胺药物商机发掘场景。从FDA页面抓取亚硝胺杂�
 
 # 亚硝胺商机发掘场景
 
+## v2 状态（2026-09：Milestone 1 完成）
+
+本 worktree = v2 开发分支（master 仍跑 v1）。已完成：
+
+- **采集层已重写**（符合 docs/v2-requirements.md 13 条验收）：`node scripts/v2/collect.js --db config/csp.db`
+  - FDA → `fda_apis` 表（中英文字段；缓存缺失且表空 = 报错，不静默）
+  - CT.gov → REST 全量拉取（带 429/5xx 递增退避重试）→ `trials` + `trial_apis`（drug_name 落 per-API 层）
+  - CDT → 浏览器游标增量（游标存 `meta.cdt_cursor:<api>`，与数据同事务）→ 同上表
+  - 新鲜度标注：`meta.ctgov_as_of` / `meta.cdt_as_of` 只在整源成功时推进；CDT 连不上浏览器时抛错且不推进 as_of（周报据此标注旧数据）
+- **DB schema**：`trials(source,regNo)` / `trial_apis`(M2M) / `fda_apis` / `exported_emails` / `meta` / `users`（scripts/v2/db.js）
+- **自检**：`node scripts/v2/verify-m0.js`（fixture 对拍）+ `node scripts/v2/verify-m1.js`（HTTP 重试/幂等）
+
+**尚未完成（后续里程碑）**：周报生成（对外仍由 v1 master 的 run-pipeline.js 产出，直到 M2/M3 切换）、导出 Excel、web 审核台。
+
+---
+
+## v1 架构（master，生产继续运行）
+
+以下内容描述 v1 pipeline（`scripts/run-pipeline.js`），master worktree 生产环境继续使用。
+
 ## 概述
 
 本场景执行三阶段 pipeline，**通过脚本自动化完成**，agent 仅负责编排和异常处理：
