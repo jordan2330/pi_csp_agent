@@ -120,6 +120,7 @@
 
 ### 新定（2026-09-03）
 - **DB 只存 trials**：`trials(source, regNo)` 唯一 + `trial_apis` M2M（不变）+ 全部采集字段含 contactEmail/Phone/Name
+- **drug_name 是 per-API 值，存 trial_apis 不存 trials**（Milestone 0 对拍实证：411 多API试验中 166 个 drugName 随 API 不同——v1 的 extractProductName 按查询词取产品名，最小事实单元是 (API, trial)）
 - **导出即聚合**：导出层按 email 动态聚合（DB 无预聚合实体）；SF lead 行 = 一个唯一 email 的容器，Description 聚合该 email 下全部试验详情
 - **SF 判重只认 email**（Salesforce 侧）：DB 入库去重 = (source, regNo)，**不沿用** SF 的 email 判重逻辑；同一 email 可出现在多条试验下，入库不合并
 - **导出增量 = email 级**（SF 判重只认 email 且重复被拒 → 主路径）：`exported_emails(email, exported_at)` 表记录已导出 email；导出列表 = "该 email 从未导出过"的 email 聚合行。**禁止 trial 级增量**（老 email 的新 trial 整行会被 SF 吞掉，BD 无法区分真假成功）

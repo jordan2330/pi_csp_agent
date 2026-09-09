@@ -13,3 +13,7 @@ test/
 /20260616_*.md
 /CSP.md
 /config/fda_nitrosamines.json
+
+# v2 runtime database
+config/csp.db*
+output/csp.db*
