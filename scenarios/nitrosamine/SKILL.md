@@ -16,8 +16,9 @@ description: 亚硝胺药物商机发掘场景。从FDA页面抓取亚硝胺杂�
   - 新鲜度标注：`meta.ctgov_as_of` / `meta.cdt_as_of` 只在整源成功时推进；CDT 连不上浏览器时抛错且不推进 as_of（周报据此标注旧数据）
 - **DB schema**：`trials(source,regNo)` / `trial_apis`(M2M) / `fda_apis` / `exported_emails` / `meta` / `users`（scripts/v2/db.js）
 - **自检**：`node scripts/v2/verify-m0.js`（fixture 对拍）+ `node scripts/v2/verify-m1.js`（HTTP 重试/幂等）
+- **周报已重写**：`node scripts/v2/report.js`（M2）—— trial 粒度按 API 分组；首期=全量市场地图，之后增量（基线 `meta.report_as_of`，生成成功后推进）；毙掉不过滤但标 ⚰️；无 email 照常；竖线/换行转义；报告头声明 CT.gov/CDT `as_of`，CDT 采集失败时标注"未更新"。只生成 MD，发送由外部脚本
 
-**尚未完成（后续里程碑）**：周报生成（对外仍由 v1 master 的 run-pipeline.js 产出，直到 M2/M3 切换）、导出 Excel、web 审核台。
+**尚未完成（后续里程碑）**：导出 Excel、web 审核台。周报对外切换时机：`collect.js` 与 `report.js` 在生产容器跑通后，由用户外部 cron/发信脚本从 v1 切到 v2 输出。
 
 ---
 
