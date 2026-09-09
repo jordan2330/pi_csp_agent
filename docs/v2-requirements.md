@@ -144,6 +144,7 @@ web = 人工审核台 + 导出器，权限简单（BD 用）：
 
 ## 附录 G：FDA 持久化 + 周报 + 邮件（2026-09-03）
 
-- **FDA 数据进 DB**：apis 表（含 fda_page_version），**表设计预留中/英文字段**（en_name + cn_name，翻译来源 = v1 的 api_translations.json，融合进 DB）；FDA 是采集输入且季度更新，但按老板要求持久化
+- **FDA 数据进 DB = fda_apis 专用表**（含 fda_page_version），**表设计预留中/英文字段**（en_name + cn_name，翻译来源 = v1 的 api_translations.json，融合进 DB）；FDA 是采集输入且季度更新，但按老板要求持久化
+- **场景 API 列表双轨**：FDA 场景的 API 列表从 DB 读；**其他场景的 API 列表留在 scenario.json 配置**（用户选择，代价=采集层支持两种 API 来源，接受）
 - **周报保留**：每周一早上自动生成 MD 报告（老板习惯）。**发送环节不归 v2**——用户另有脚本处理邮件投递，v2 只管生成，不实现 SMTP
 - **周报口径（2026-09-03 确认）**：① 全部新增 trial，不过滤毙掉（周报=市场视野，毙掉=导出决策，⚰️ 标记可见）② trial 粒度不按 email 聚合 ③ 无 email 的 trial 照常进周报 ④ 收件人/发送由用户外部脚本负责
