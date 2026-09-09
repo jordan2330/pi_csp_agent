@@ -37,9 +37,9 @@ function req(path, { method = 'GET', form, cookie } = {}) {
     if (cookie) reqOpt.headers.Cookie = cookie;
     if (body) { reqOpt.headers['Content-Type'] = 'application/x-www-form-urlencoded'; reqOpt.headers['Content-Length'] = Buffer.byteLength(body); }
     const r = http.request({ host: '127.0.0.1', port: srv.address().port, ...reqOpt }, res => {
-      let data = '';
-      res.on('data', c => data += c);
-      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: data }));
+      const chunks = [];
+      res.on('data', c => chunks.push(c));
+      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks) }));
       res.on('error', reject);
     });
     r.on('error', reject);
@@ -67,8 +67,8 @@ const cookieOf = res => (res.headers['set-cookie'] || [''])[0].split(';')[0];
 
   const home = await req('/', { cookie });
   assert.strictEqual(home.status, 200);
-  assert.match(home.body, /CSP 审核台/);
-  assert.match(home.body, /a@x\.com/);
+  assert.match(home.body.toString(), /CSP 审核台/);
+  assert.match(home.body.toString(), /a@x\.com/);
 
   // ③ 编辑补全 email
   await req('/trials/CT.gov/NCT_W3/edit', {
@@ -93,13 +93,24 @@ const cookieOf = res => (res.headers['set-cookie'] || [''])[0].split(';')[0];
   // ⑤ 缺邮箱清单（NCT_W3 已补 → 0 条）
   const noEmail = await req('/no-email', { cookie });
   assert.strictEqual(noEmail.status, 200);
-  assert(!noEmail.body.includes('NCT_W3'));
+  assert(!noEmail.body.toString().includes("NCT_W3"));
 
   // ⑥ 验证 session 有效性（伪造 cookie 拒绝）
   const fake = await req('/', { cookie: 'csp_sid=1.9999999999.deadbeef' });
   assert.strictEqual(fake.status, 302);
 
-  console.log('PASS ① 认证 ② 登录 ③ 编辑补全→候选 ④ 毙掉/恢复 ⑤ 缺邮箱清单 ⑥ 伪造会话拒绝');
+  // ⑦ 导出端点: 预览含候选人 → POST 下载 xlsx → 导出后再看候选为空
+  const expPage = await req('/export', { cookie });
+  assert.strictEqual(expPage.status, 200);
+  assert(expPage.body.toString().includes('a@x.com'), '导出预览应含候选人');
+  const dl = await req('/export', { method: 'POST', cookie, form: { email: 'a@x.com' } });
+  assert.strictEqual(dl.status, 200, 'xlsx 下载应 200');
+  assert.match(dl.headers['content-type'] || '', /spreadsheetml/);
+  assert(dl.body[0] === 0x50 && dl.body[1] === 0x4b, 'xlsx 魔数 (PK)');
+  const home2 = await req('/', { cookie });
+  assert(!home2.body.toString().includes('a@x.com'), '已导出 email 不应再是候选');
+
+  console.log('PASS ① 认证 ② 登录 ③ 编辑补全→候选 ④ 毙掉/恢复 ⑤ 缺邮箱清单 ⑥ 伪造会话拒绝 ⑦ 导出端点');
   console.log('\nM3 自检 ALL PASS');
   srv.close();
   process.exit(0);

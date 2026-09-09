@@ -19,7 +19,10 @@ description: 亚硝胺药物商机发掘场景。从FDA页面抓取亚硝胺杂�
 - **周报已重写**：`node scripts/v2/report.js`（M2）—— trial 粒度按 API 分组；首期=全量市场地图，之后增量（基线 `meta.report_as_of`，生成成功后推进）；毙掉不过滤但标 ⚰️；无 email 照常；竖线/换行转义；报告头声明 CT.gov/CDT `as_of`，CDT 采集失败时标注"未更新"。只生成 MD，发送由外部脚本
 - **web 审核台已上线**：`node scripts/v2/web.js`（M3）—— Express + SSR + node:sqlite；登录（`scripts/v2/add-user.js <user> <pass> [bd|admin]`，scrypt 哈希 + HMAC 会话 cookie）；导出候选按 email 聚合（默认全选反选）；编辑/补全 email|姓名|电话；毙掉/恢复（trial 级）；缺邮箱清单随手补。`CSP_DB`/`PORT`/`CSP_SESSION_SECRET` env 可配
 
-**尚未完成（后续里程碑）**：导出 Excel（web 已就绪，唯缺导出按钮接 Excel 生成器）、web 反选勾选的落库状态（目前候选表勾选框 disabled，导出时直接按`未毙掉 + 未导出 email`过滤即可）、Dockerfile/docker-compose 补齐 web 服务。
+- **导出 Excel 已上线**：`scripts/v2/export.js` + web `/export`（M4）—— 每个唯一 email 一行（SF 判重口径）；16 列 SF Import Template 表头 + `Import Template` sheet 名；毙掉 trial 不参与聚合、email 下全毙整行不出；Company/姓名/电话取 regDate 最新活 trial；姓名拆分（英文最后空格拆、中文整名进 Last、First 填 "."）；Description 聚合试验明细；picklist 默认值 Lead Source=Self-generated / Prospecting / Region=APAC / Business Unit=CSP / Lead Status=Needs Outreach；反选勾选 → 下载 xlsx → 写 exported_emails（增量不重导）
+- 自检全量：`npm run verify`（verify-m0 fixture 对拍 + m1 HTTP 重试/幂等 + m2 周报口径 + m3 web 7 项 + m4 导出 4 项）
+
+**尚未完成（后续里程碑）**：Dockerfile/docker-compose 更新（web 服务挂载 + add-user 初始化 + cron 切 v2）、生产切换（由用户决定时机，从 v1 切到 v2 输出）。
 
 ---
 

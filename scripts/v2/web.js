@@ -83,6 +83,8 @@ function createApp(db) {
         <div class="stat"><b>${stats.noEmail}</b><span>缺邮箱</span></div>
       </div>
 
+      <p><a class="btn" href="/export">📥 导出 Salesforce Excel</a></p>
+
       <div class="fresh card">
         <b>数据新鲜度</b>
         <span>CT.gov 截至 ${esc(freshness.ctgov)}</span>
@@ -106,6 +108,45 @@ function createApp(db) {
       <p><a href="/no-email">缺邮箱清单（${stats.noEmail}）→</a></p>`;
 
     res.send(page('CSP 审核台', body));
+  });
+
+  // ── 导出（M4）: 预览 + 反选勾选 → xlsx 下载 + 标记 exported_emails ──
+  app.get('/export', (req, res) => {
+    if (!req.session) return res.redirect('/login');
+    const rows = exportCandidates(db);
+    const body = `
+      <p><a href="/">← 返回</a></p>
+      <h2>导出为 Salesforce Excel</h2>
+      <p class="muted">每个唯一 email 一行（SF 按 email 判重）。勾选 = 本批导出（已毙 trial 不参与聚合）。</p>
+      <form method="POST" action="/export">
+        <table>
+          <tr><th>导</th><th>Email</th><th>公司</th><th>活试验数</th><th>联系人</th></tr>
+          ${rows.map(r => `
+            <tr>
+              <td><input type="checkbox" name="email" value="${esc(r.email)}" checked></td>
+              <td>${esc(r.email)}</td>
+              <td>${esc(r.company)}</td>
+              <td>${r.live}</td>
+              <td>${r.trialCount}</td>
+            </tr>`).join('')}
+        </table>
+        ${rows.length ? '<button type="submit">生成并下载 Excel（标记已导出）</button>' : '<p>没有任何可导出的 lead（缺 email 的先去补全）。</p>'}
+      </form>`;
+    res.send(page('导出 Excel', body));
+  });
+
+  app.post('/export', async (req, res) => {
+    if (!req.session) return res.redirect('/login');
+    const emails = Array.isArray(req.body.email) ? req.body.email : (req.body.email ? [req.body.email] : []);
+    if (emails.length === 0) return res.redirect('/export');
+    const { buildExcel, markExported } = require('./export');
+    const { buffer } = buildExcel(db, { emails });
+    markExported(db, emails);
+    const buf = await buffer();
+    const fname = `CSP_leads_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${fname}"`);
+    res.send(Buffer.from(buf));
   });
 
   // ── 按 email 查看该 lead 下全部 trial（展开编辑） ──
@@ -196,6 +237,7 @@ function exportCandidates(db) {
   return db.prepare(`
     SELECT contactEmail AS email,
            (SELECT sponsor FROM trials t2 WHERE t2.contactEmail = t.contactEmail
+              AND t2.killed_at IS NULL
               ORDER BY regDate DESC LIMIT 1) AS company,
            COUNT(*) AS trialCount,
            SUM(CASE WHEN killed_at IS NOT NULL THEN 1 ELSE 0 END) AS killed,
@@ -203,7 +245,9 @@ function exportCandidates(db) {
            MIN(first_seen_at) AS firstSeen
     FROM trials t
     WHERE contactEmail IS NOT NULL AND contactEmail != ''
+      AND contactEmail NOT IN (SELECT email FROM exported_emails)
     GROUP BY contactEmail
+    HAVING SUM(CASE WHEN killed_at IS NULL THEN 1 ELSE 0 END) > 0
     ORDER BY firstSeen DESC`).all();
 }
 
@@ -215,6 +259,7 @@ function page(title, body) {
   body{font-family:system-ui,-apple-system,sans-serif;max-width:880px;margin:24px auto;padding:0 16px;color:#222}
   h1{font-size:1.5em} h2{font-size:1.2em;margin-top:1.6em}
   a{color:#0b5cad}
+  a.btn{display:inline-block;background:#0b5cad;color:#fff;text-decoration:none;border-radius:4px;padding:8px 14px;margin:6px 0}
   .card{border:1px solid #ddd;border-radius:8px;padding:12px 16px;margin:10px 0;background:#fff}
   .card.killed{background:#fff5f5;border-color:#f0c0c0}
   .w360{max-width:360px;margin:60px auto}
