@@ -17,3 +17,5 @@ test/
 # v2 runtime database
 config/csp.db*
 output/csp.db*
+node_modules/
+config/.session-secret

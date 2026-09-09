@@ -17,8 +17,9 @@ description: 亚硝胺药物商机发掘场景。从FDA页面抓取亚硝胺杂�
 - **DB schema**：`trials(source,regNo)` / `trial_apis`(M2M) / `fda_apis` / `exported_emails` / `meta` / `users`（scripts/v2/db.js）
 - **自检**：`node scripts/v2/verify-m0.js`（fixture 对拍）+ `node scripts/v2/verify-m1.js`（HTTP 重试/幂等）
 - **周报已重写**：`node scripts/v2/report.js`（M2）—— trial 粒度按 API 分组；首期=全量市场地图，之后增量（基线 `meta.report_as_of`，生成成功后推进）；毙掉不过滤但标 ⚰️；无 email 照常；竖线/换行转义；报告头声明 CT.gov/CDT `as_of`，CDT 采集失败时标注"未更新"。只生成 MD，发送由外部脚本
+- **web 审核台已上线**：`node scripts/v2/web.js`（M3）—— Express + SSR + node:sqlite；登录（`scripts/v2/add-user.js <user> <pass> [bd|admin]`，scrypt 哈希 + HMAC 会话 cookie）；导出候选按 email 聚合（默认全选反选）；编辑/补全 email|姓名|电话；毙掉/恢复（trial 级）；缺邮箱清单随手补。`CSP_DB`/`PORT`/`CSP_SESSION_SECRET` env 可配
 
-**尚未完成（后续里程碑）**：导出 Excel、web 审核台。周报对外切换时机：`collect.js` 与 `report.js` 在生产容器跑通后，由用户外部 cron/发信脚本从 v1 切到 v2 输出。
+**尚未完成（后续里程碑）**：导出 Excel（web 已就绪，唯缺导出按钮接 Excel 生成器）、web 反选勾选的落库状态（目前候选表勾选框 disabled，导出时直接按`未毙掉 + 未导出 email`过滤即可）、Dockerfile/docker-compose 补齐 web 服务。
 
 ---
 
