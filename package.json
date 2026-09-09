@@ -4,7 +4,7 @@
   "private": true,
   "description": "CSP sales lead discovery: collect → SQLite → audit web → Excel export",
   "scripts": {
-    "verify": "node scripts/v2/verify-m0.js /tmp/m0.db docs/fixtures/ctgov-golden-2026-08-28.json && node scripts/v2/verify-m1.js && node scripts/v2/verify-m2.js"
+    "verify": "node scripts/v2/verify-m0.js /tmp/m0.db docs/fixtures/ctgov-golden-2026-08-28.json && node scripts/v2/verify-m1.js && node scripts/v2/verify-m2.js && node scripts/v2/verify-m3.js"
   },
   "dependencies": {
     "express": "^4.21.2"
