@@ -22,7 +22,15 @@ description: 亚硝胺药物商机发掘场景。从FDA页面抓取亚硝胺杂�
 - **导出 Excel 已上线**：`scripts/v2/export.js` + web `/export`（M4）—— 每个唯一 email 一行（SF 判重口径）；16 列 SF Import Template 表头 + `Import Template` sheet 名；毙掉 trial 不参与聚合、email 下全毙整行不出；Company/姓名/电话取 regDate 最新活 trial；姓名拆分（英文最后空格拆、中文整名进 Last、First 填 "."）；Description 聚合试验明细；picklist 默认值 Lead Source=Self-generated / Prospecting / Region=APAC / Business Unit=CSP / Lead Status=Needs Outreach；反选勾选 → 下载 xlsx → 写 exported_emails（增量不重导）
 - 自检全量：`npm run verify`（verify-m0 fixture 对拍 + m1 HTTP 重试/幂等 + m2 周报口径 + m3 web 7 项 + m4 导出 4 项）
 
-**尚未完成（后续里程碑）**：Dockerfile/docker-compose 更新（web 服务挂载 + add-user 初始化 + cron 切 v2）、生产切换（由用户决定时机，从 v1 切到 v2 输出）。
+**部署（M5）**：
+- 镜像已含 express/exceljs（全局安装，`NODE_PATH` 进容器即用）
+- `docker compose up -d web` → 审核台 http://host:3210
+- 建账号：`docker compose run --rm csp-agent node scripts/v2/add-user.js admin <密码> admin`
+- 采集：`docker compose run --rm csp-agent node scripts/v2/collect.js`（需 BROWSER_ENDPOINT）
+- 周报：`docker compose run --rm csp-agent node scripts/v2/report.js`
+- 容器内全量自检：`docker compose run --rm csp-agent npm run verify`
+
+**生产切换（未做，等用户指令）**：v1 master 的 crontab 仍产出 v1 报告；v2 采集/周报由用户在自己 cron 表加两行（collect 周中、report 周一早），确认输出后停 v1。
 
 ---
 

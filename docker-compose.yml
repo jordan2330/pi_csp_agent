@@ -10,3 +10,19 @@ services:
       - ./config/models.json:/home/piuser/.pi/agent/models.json:ro
     stdin_open: true
     tty: true
+
+  # v2 审核台（常驻）: 登录补全/毙掉/导出Excel
+  web:
+    build: .
+    command: node scripts/v2/web.js
+    environment:
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY}
+      - CSP_DB=/workspace/config/csp.db
+      - PORT=3000
+    ports:
+      - "3210:3000"
+    volumes:
+      - .:/workspace
+      - ./pi-home:/home/piuser
+      - ./config/models.json:/home/piuser/.pi/agent/models.json:ro
+    restart: unless-stopped
