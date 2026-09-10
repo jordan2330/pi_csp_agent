@@ -8,7 +8,7 @@ const assert = require('assert');
 const http = require('http');
 const { getJSON } = require('./lib/http');
 const { openDB } = require('./db');
-const { writeTrials } = require('./store');
+const { writeTrials, getCursor, setCursor } = require('./store');
 
 // ── ① 重试: 429×2 → 200，断言第三次成功 ──
 async function testRetry() {
@@ -43,9 +43,12 @@ async function testNoRetryOn404() {
   console.log('PASS ② 404 不重试');
 }
 
-// ── ③ store 幂等 + 状态字段不重置 ──
+// ── ③ store 幂等 + 游标往返（防 collect 引用不存在 API 的回归） ──
 function testStoreIdempotent() {
   const db = openDB(':memory:');
+  assert.strictEqual(getCursor(db, 'cdt_cursor:X'), null);
+  setCursor(db, 'cdt_cursor:X', 'CTR20249999');
+  assert.strictEqual(getCursor(db, 'cdt_cursor:X'), 'CTR20249999');
   const torn = Math.round(Date.now() / 6), other = Math.round(Date.now() / 7);
 
   let r = writeTrials(db, [{

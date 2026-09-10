@@ -57,4 +57,14 @@ function writeTrials(db, rows) {
   return { inserted, updated };
 }
 
-module.exports = { prepare, withTransaction, writeTrials, DATA_FIELDS };
+function getCursor(db, key) {
+  const row = db.prepare('SELECT value FROM meta WHERE key=?').get(key);
+  return row ? row.value : null;
+}
+
+function setCursor(db, key, value) {
+  db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value')
+    .run(key, value);
+}
+
+module.exports = { prepare, withTransaction, writeTrials, getCursor, setCursor, DATA_FIELDS };
