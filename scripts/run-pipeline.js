@@ -43,15 +43,16 @@ const CDT_DELAY_RANGE = CDT_THROTTLE.delay_between_apis_ms || [5000, 8000];
 const FDA_REFRESH_DAYS = 90;  // FDA 列表建议刷新周期
 const today = new Date();
 const todayStr = today.toISOString().slice(0, 10);
-const cutoff = new Date(today);
-cutoff.setFullYear(cutoff.getFullYear() - 2);
+// 数据时间窗起点：由 scenario.json 的 lookback_years 决定，加载场景后赋值
+let cutoff;
+let LOOKBACK_YEARS = 2;
 
 // ── Helpers ──
 function ts() { return new Date().toISOString().slice(11, 19); }
 function log(m) { console.error(`[${ts()}] ${m}`); }
 function ensureDir(d) { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); }
 function parseDate(s) { if (!s) return null; const d = new Date(s.length === 7 ? s + '-01' : s); return isNaN(d) ? null : d; }
-function within2Yr(dateStr) { const d = parseDate(dateStr); return !d || d >= cutoff; }
+function withinWindow(dateStr) { const d = parseDate(dateStr); return !d || d >= cutoff; }
 function daysBetween(d1, d2) { return Math.floor((d2 - d1) / (86400000)); }
 
 // ── Load scenario ──
@@ -64,6 +65,11 @@ if (!fs.existsSync(path.join(scenarioDir, 'scenario.json'))) {
 const scenarioConfig = JSON.parse(fs.readFileSync(path.join(scenarioDir, 'scenario.json'), 'utf8'));
 const scenarioHooks = require(path.join(scenarioDir, 'enrich.js'));
 const scenario = { name: scenarioName, dir: scenarioDir, config: scenarioConfig, hooks: scenarioHooks };
+
+// 数据时间窗（scenarios/<name>/scenario.json → lookback_years，默认 2 年）
+LOOKBACK_YEARS = Number(scenarioConfig.lookback_years) || 2;
+cutoff = new Date(today);
+cutoff.setFullYear(cutoff.getFullYear() - LOOKBACK_YEARS);
 
 const FDA_FILE = path.join(WS, scenarioConfig.cache_file);
 const sources = require(path.join(__dirname, 'lib/sources.js'));
@@ -157,7 +163,7 @@ async function phase2a_ctgov(allApis, isFull) {
   log('═══ Phase 2a: CT.gov REST API 搜索 ═══');
   log(`API 总数: ${allApis.length} | 模式: ${isFull ? '🔄 全量' : '📈 增量（对比缓存检测新增）'}`);
   log(`中国过滤: 仅保留 location.country=China 的试验`);
-  log(`日期过滤: >= ${cutoff.toISOString().slice(0, 10)} (2年)`);
+  log(`日期过滤: >= ${cutoff.toISOString().slice(0, 10)} (${LOOKBACK_YEARS}年内)`);
 
   if (isFull) {
     Object.values(fda.apis).forEach(api => {
@@ -180,7 +186,7 @@ async function phase2a_ctgov(allApis, isFull) {
     try {
       const result = await sources.ctgovFetch(name);
       const allTrials = sources.ctgovToTrials(result, name);
-      const filtered = allTrials.filter(t => within2Yr(t.regDate));
+      const filtered = allTrials.filter(t => withinWindow(t.regDate));
 
       // 增量检测: 对比新拉取的 NCT ID 与缓存中的 NCT ID
       const existingCDT = (api.results || []).filter(r => r.source === 'CDT');
@@ -214,7 +220,7 @@ async function phase2a_ctgov(allApis, isFull) {
 
       if (newTrials.length > 0 || i % 25 === 0) {
         const newInfo = newTrials.length > 0 ? ` (+${newTrials.length}新)` : '';
-        log(`  [${i + 1}] ${name}: ${result.fetchedCount}→${allTrials.length}(中国)→${filtered.length}(2年)${newInfo}`);
+        log(`  [${i + 1}] ${name}: ${result.fetchedCount}→${allTrials.length}(中国)→${filtered.length}(${LOOKBACK_YEARS}年)${newInfo}`);
       }
     } catch (e) {
       fs.appendFileSync(ERR_LOG, `[${new Date().toISOString()}] [CT.gov] ${name}: ${e.message.substring(0, 200)}\n`);

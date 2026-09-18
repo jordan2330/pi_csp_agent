@@ -187,7 +187,7 @@ tail -20 output/runs/pipeline.log
 - 使用 `https://clinicaltrials.gov/api/v2/studies` REST API（不是浏览器）
 - 每个 API 用英文名搜索，限定 `locStr=China`
 - 提取：产品名称（Intervention.name）、剂型（Intervention.description 推断）、联系方式（centralContacts + Location.contacts）
-- 日期过滤：仅保留 2 年内的试验
+- 日期过滤：仅保留窗口期内的试验（窗口 = `scenario.json → lookback_years`，当前 **1 年**；CT.gov 用精确日期，CDT 用登记号年份粒度）
 - 每个 API 间隔 800ms，约 5-8 分钟完成全部 251 个 API（单次失败自动重试：超时/429/5xx 最多 3 次尝试，递增退避）
 
 #### Phase 2b: CDT 浏览器搜索（本机真实 Chrome + 单 worker）
@@ -197,6 +197,7 @@ tail -20 output/runs/pipeline.log
 - 调用 `scripts/lib/sources.cdtSearchOneAPI()` → `skills/browser_executor/scripts/cdt-search-lib.js`
 - 用中文名搜索，提取：产品名称（drugName）、剂型（中文后缀识别）、试验分期、企业联系方式
 - 每 API 参数：`maxPages: 5, batchSize: 50`
+- 时间窗过滤：登记号年份 >= 窗口起始年（`lookback_years`）；结果按登记号降序，**整页登记号都早于窗口年份即早停翻页**（省请求、降风控暴露）
 - API 间延迟: 5-8s（配置在 `config/cdt-throttle.json`）
 - 全量（首次/重扫）约 3-4 小时；增量模式无新增时每 API 仅翻 1-2 页，通常几十分钟完成
 - 如确需提速可临时把 `CDT_WORKER_COUNT` 调到 2（代价：并发行为更容易被风控识别）
@@ -290,7 +291,7 @@ node scripts/run-pipeline.js nitrosamine
 | `config/fda_nitrosamines.json` | 核心数据库：API 列表 + 搜索状态 + 试验结果 |
 | `config/search-config.json` | 搜索模式控制（full / incremental） |
 | `config/api_translations.json` | API 英文名 → 中文名映射 |
-| `scenarios/nitrosamine/scenario.json` | 场景声明式配置（标题/表头列/CSP推荐矩阵/缓存与报告路径） |
+| `scenarios/nitrosamine/scenario.json` | 场景声明式配置（标题/表头列/CSP推荐矩阵/时间窗 lookback_years/缓存与报告路径） |
 | `scenarios/nitrosamine/enrich.js` | 场景专属 hooks（药物分类、CSP推荐、报告小标题等，由 `scripts/lib/report.js` 调用） |
 | `scripts/lib/` | 通用层：`sources.js`(双源采集) / `enrichment.js`(剂型检测) / `snapshot.js`(快照+增量) / `report.js`(通用渲染器) |
 | `output/runs/YYYY-MM-DD.json` | 运行快照（用于增量对比） |

@@ -22,7 +22,7 @@ This is a Pi Coding Agent project for CSP (Aptar active packaging) sales lead di
   - `scripts/cdt-search.js` — 同上的 CLI 包装（调试/验证用）
 - `scenarios/` — Business scenario skills (nitrosamine, probiotics, IVD, etc.)
   - `scenarios/<name>/SKILL.md` — 场景指令（pipeline 编排）
-  - `scenarios/<name>/scenario.json` — 声明式配置（表头列、CSP推荐矩阵、缓存/报告路径）
+  - `scenarios/<name>/scenario.json` — 声明式配置（表头列、CSP推荐矩阵、数据时间窗、缓存/报告路径）
   - `scenarios/<name>/enrich.js` — 场景专属 hooks（药物分类、CSP推荐、报告小标题等）
 - `scripts/` — Pipeline 自动化脚本
   - `run-pipeline.js` — 主编排器（Phase 2+3：双源搜索 → 快照 → 报告）

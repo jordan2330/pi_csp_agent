@@ -231,6 +231,12 @@ function getMaxRegNo(results) {
   return max;
 }
 
+// ── 从 regNo 取登记年份（CTR + 四位年）；取不到返回 0 ──
+function regNoYear(regNo) {
+  const m = (regNo || '').match(/CTR(\d{4})/i);
+  return m ? parseInt(m[1], 10) : 0;
+}
+
 /**
  * 搜索一个 API 的 CDT 数据
  *
@@ -308,16 +314,23 @@ async function searchOneAPI(browser, apiName, opts = {}) {
     let allResults = [...searchData.results];
     let globalMaxRegNo = getMaxRegNo(searchData.results);
     let cursorHit = false;
+    let windowHit = false;
 
     if (cursor && globalMaxRegNo && globalMaxRegNo <= cursor) {
       console.error(`${logPrefix} ${apiName}: 游标停止: 首页最大登记号 ${globalMaxRegNo} <= cursor ${cursor}`);
       cursorHit = true;
     }
 
+    // 年份窗口早停（结果按登记号降序）：首页最新登记号都已早于窗口年份 → 无需翻页
+    if (minYear > 0 && regNoYear(globalMaxRegNo) > 0 && regNoYear(globalMaxRegNo) < minYear) {
+      console.error(`${logPrefix} ${apiName}: 年份窗口早停: 首页最新登记号 ${globalMaxRegNo} 早于 ${minYear} 年`);
+      windowHit = true;
+    }
+
     // ══════════════════════════════════════
     // Step 2: 翻页
     // ══════════════════════════════════════
-    if (!cursorHit && searchData.pagination.totalPages > 1) {
+    if (!cursorHit && !windowHit && searchData.pagination.totalPages > 1) {
       const totalPages = Math.min(searchData.pagination.totalPages, maxPages);
       for (let pg = 2; pg <= totalPages; pg++) {
         await sleep(randDelay(THROTTLE.delay_page_turn_ms));
@@ -331,6 +344,11 @@ async function searchOneAPI(browser, apiName, opts = {}) {
           const pageResults = await page.evaluate(extractSearchResults).then(d => d.results);
           if (pageResults && pageResults.length > 0) {
             const pageMaxRegNo = getMaxRegNo(pageResults);
+            // 年份窗口早停：整页登记号都早于窗口年份 → 后续页更旧，停止翻页
+            if (minYear > 0 && regNoYear(pageMaxRegNo) > 0 && regNoYear(pageMaxRegNo) < minYear) {
+              console.error(`${logPrefix} ${apiName}: 年份窗口早停: 第${pg}页最新登记号 ${pageMaxRegNo} 早于 ${minYear} 年`);
+              break;
+            }
             if (cursor && pageMaxRegNo && pageMaxRegNo <= cursor) {
               console.error(`${logPrefix} ${apiName}: 游标停止: 第${pg}页最大登记号 ${pageMaxRegNo} <= cursor ${cursor}`);
               cursorHit = true;

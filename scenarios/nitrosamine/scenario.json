@@ -4,6 +4,7 @@
   "report_file": "output/CSP_Leads_Report.md",
   "cache_file": "config/fda_nitrosamines.json",
   "cache_version_field": "fda_page_version",
+  "lookback_years": 1,
   "api_translations_file": "config/api_translations.json",
   "source_label": "FDA (版本 {version}) + 中国药物临床试验登记与信息公示平台 + ClinicalTrials.gov",
   "headings": {

@@ -128,16 +128,16 @@ function generateReport(snapshot, scenario, isFull) {
     };
   });
 
-  // ── Date filter (2 years) ──
+  // ── Date filter（scenarios/<name>/scenario.json → lookback_years，默认 2 年）──
   const todayDate = new Date(today);
-  const twoYearsAgo = new Date(todayDate);
-  twoYearsAgo.setFullYear(todayDate.getFullYear() - 2);
+  const windowStart = new Date(todayDate);
+  windowStart.setFullYear(todayDate.getFullYear() - (Number(config.lookback_years) || 2));
 
   const filteredResults = {};
   Object.entries(results).forEach(([apiName, trials]) => {
     filteredResults[apiName] = (trials || []).filter(t => {
       const regDate = parseDate(t.regDate);
-      return !regDate || regDate >= twoYearsAgo;
+      return !regDate || regDate >= windowStart;
     });
   });
   const apisWithLeads = Object.keys(filteredResults).filter(k => (filteredResults[k] || []).length > 0);
