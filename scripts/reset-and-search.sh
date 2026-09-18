@@ -15,8 +15,9 @@
 #   - search_mode 自动改回 incremental
 
 set -e
-WS=/workspace
+WS="$(cd "$(dirname "$0")/.." && pwd)"
 SCENARIO="${1:-nitrosamine}"
+# 说明：本地直接运行（WSL/Windows+Git Bash），不再依赖容器内 /workspace
 SCENARIO_DIR="$WS/scenarios/$SCENARIO"
 
 if [[ ! -f "$SCENARIO_DIR/scenario.json" ]]; then

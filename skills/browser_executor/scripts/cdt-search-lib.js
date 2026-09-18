@@ -4,11 +4,11 @@
  * 导出:
  *   searchOneAPI(browser, apiName, opts) → { totalResults, filteredTotal, detailedTrials, newCursor, cursorHit }
  *   loadThrottle() → throttle config object
- *   connectBrowser() → Playwright browser (带重试)
- *   createWorkerContext(browser) → Playwright browser context (带 stealth)
+ *   connectBrowser() → Playwright browser（真浏览器 CDP 优先，见 browser-connect.js）
+ *   createWorkerContext(browser) → Playwright browser context（真浏览器不做指纹伪造）
+ *   isRealBrowser() → 当前连接是否指向用户真实浏览器
  */
 
-const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
@@ -56,33 +56,30 @@ const STEALTH_INIT = `
   window.chrome = { runtime: {} };
 `;
 
-// ── 浏览器连接 (带 429 重试) ──
+// ── 浏览器连接（真浏览器 CDP 优先；端点解析见 browser-connect.js）──
+let REAL_BROWSER = false;
+function isRealBrowser() { return REAL_BROWSER; }
+
 async function connectBrowser() {
-  if (!process.env.BROWSER_ENDPOINT) {
-    return await chromium.launch({ headless: true, args: STEALTH_ARGS });
-  }
-  for (let attempt = 1; attempt <= 6; attempt++) {
-    try {
-      return await chromium.connectOverCDP(process.env.BROWSER_ENDPOINT);
-    } catch (e) {
-      if (/429|Too Many Requests/i.test(e.message) && attempt < 6) {
-        const wait = Math.min(THROTTLE.retry_429_base_ms * attempt + Math.random() * 5000, THROTTLE.retry_429_max_ms);
-        console.error(`[CDT] 429 连接限流, 等待 ${(wait/1000).toFixed(0)}s 重试 (${attempt}/6)...`);
-        await sleep(wait);
-      } else throw e;
-    }
-  }
+  const { connectBrowser: connect } = require('./browser-connect');
+  const { browser, isRealBrowser: real } = await connect({ launchArgs: STEALTH_ARGS });
+  REAL_BROWSER = real;
+  return browser;
 }
 
-// ── 创建 worker 上下文 (带 stealth) ──
+// ── 创建 worker 上下文 ──
+// 真浏览器：不覆盖 UA/viewport，也不注入伪造指纹——真 Chrome 本就没有自动化痕迹，
+//           伪造的 navigator 值反而是瑞数动态安全可识别的特征
 async function createWorkerContext(browser) {
   const context = await browser.newContext({
     locale: 'zh-CN',
-    viewport: { width: 1280, height: 720 },
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     extraHTTPHeaders: { 'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8' },
+    ...(REAL_BROWSER ? { viewport: null } : {
+      viewport: { width: 1280, height: 720 },
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    }),
   });
-  await context.addInitScript(STEALTH_INIT);
+  if (!REAL_BROWSER) await context.addInitScript(STEALTH_INIT);
   return context;
 }
 
@@ -483,5 +480,6 @@ module.exports = {
   connectBrowser,
   createWorkerContext,
   isBrowserDeadError,
+  isRealBrowser,
   THROTTLE_DEFAULTS
 };

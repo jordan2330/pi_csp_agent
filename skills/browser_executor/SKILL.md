@@ -13,12 +13,20 @@ description: 真实浏览器自动化工具。使用 Playwright 在真实 Chromi
 
 ## 浏览器连接模式
 
-支持双模式连接，通过环境变量 `BROWSER_ENDPOINT` 切换：
+连接端点由 `scripts/browser-connect.js` 统一解析，优先级：
 
-- **远程模式**（生产环境）：`BROWSER_ENDPOINT` 设为 browserless WebSocket 地址（如 `ws://host:3000/?token=...`）→ 使用 `chromium.connectOverCDP()` 连接远程浏览器
-- **本地模式**（开发调试）：`BROWSER_ENDPOINT` 未设 → 使用 `chromium.launch()` 启动本地 Chromium
+1. **`BROWSER_ENDPOINT` 环境变量**（显式指定，`http://` 或 `ws://` 均可）—— 必须成功，失败即报错
+2. **默认本机真浏览器端点 `http://127.0.0.1:9223`**（生产模式）：Windows 侧专用 profile Chrome，由 `scripts/launch-chrome.sh` 启动；端点已在跑则直接连，未启动会自动拉起 Chrome 后重连
+3. **`CDP_ALLOW_LOCAL_LAUNCH=1` 时**兜底 `chromium.launch()`（仅开发调试用）
 
-两种模式都应用相同的 stealth 伪装（详见下文）。
+**为什么必须是真浏览器**：CDT（chinadrugtrials.org.cn）已启用瑞数动态安全（JS 质询 + 浏览器指纹检测），headless/自动化浏览器会被质询拦截；真实 Chrome 才能正常通过。
+
+**前置条件**：WSL 需 mirrored 网络模式（`.wslconfig` → `networkingMode=mirrored`），否则访问不到 Windows 的 `127.0.0.1`。
+
+**真浏览器模式（`isRealBrowser=true`）的行为差异**：
+- 不覆盖 `userAgent` / `viewport`（要么用真实值，覆盖反而造成 UA 与客户端提示不一致）
+- 不注入伪造指纹（详见下文反检测机制）
+- 仅在本地兜底 launch 时才应用 stealth 伪装
 
 ## 使用方法
 
@@ -104,8 +112,8 @@ node skills/browser_executor/scripts/browser.js screenshot <url> <output-path>
 
 ## 路径说明
 
-- 脚本路径相对于工作目录（Docker 中为 `/workspace`）
-- 截图路径建议使用临时目录
+- 脚本路径相对于工作目录（仓库根目录即工作目录）
+- 截图路径建议放 `/tmp` 或仓库内 `output/` 下
 - Cookie 状态自动保存在临时目录的 `browser-state.json`，跨调用保持会话
 
 ## 错误处理
@@ -113,17 +121,18 @@ node skills/browser_executor/scripts/browser.js screenshot <url> <output-path>
 - 任何步骤失败，整个脚本终止，错误信息输出到 stderr
 - 建议 Pi 在遇到错误时截图调试，然后调整选择器重试
 
-## 反检测机制（已内置）
+## 反检测机制
 
-browser.js 已内置以下反爬虫措施，两种连接模式都生效：
-- 隐藏 `navigator.webdriver` 标志
-- 注入伪装的 `navigator.plugins`、`navigator.languages`、`window.chrome`
-- 禁用 `AutomationControlled` 特征（本地模式）
-- 伪装 User-Agent 和 Accept-Language 头
-- Cookie 持久化（跨调用保持会话）
-- 远程模式下 browserless 自身也提供 stealth 伪装
+**真浏览器模式（默认，生产）**：
+- **不注入任何伪造指纹**：真 Chrome 本来就没有 `navigator.webdriver` 等自动化痕迹，而伪造值（如 `plugins=[1,2,3,4,5]`）本身是瑞数可识别的特征
+- 只保留 `locale: zh-CN` 与 `Accept-Language`（保证中文站点正常返回）
+- 瑞数质询由真实浏览器引擎自动通过（已实测，无需人工兵底）
 
-如遇验证码，截图保存并跳过当前任务。
+**本地兵底 launch 模式（仅调试）**：
+- 隐藏 `navigator.webdriver`、注入 `plugins`/`languages`/`window.chrome`、禁用 `AutomationControlled`、伪装 UA
+- 注意：该模式**不建议**用于 CDT 生产采集，很可能被瑞数拦截
+
+如页面出现验证码，截图保存并向用户报告即可（真浏览器模式下用户可在 Chrome 窗口手动处理）。
 
 ## 代码安全约束
 

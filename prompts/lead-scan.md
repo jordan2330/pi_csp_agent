@@ -12,6 +12,7 @@ argument-hint: "<scenario>"
 ### Phase 0: 环境检查
 - 读取 `config/search-config.json`，确认搜索模式（full 或 incremental）
 - 检查 `config/fda_nitrosamines.json` 是否存在且非空
+- 确认 Chrome CDP 端点可用：`curl -s -o /dev/null http://127.0.0.1:9223/json/version`；不通则先运行 `bash scripts/launch-chrome.sh`
 
 ### Phase 1: FDA 数据
 - 如果 FDA 缓存已存在（apis 数量 > 0），跳过采集，直接进入 Phase 2
@@ -21,9 +22,9 @@ argument-hint: "<scenario>"
 - **直接执行 pipeline 脚本**，不要手动逐个 API 搜索
 - 由于 CDT 浏览器搜索可能耗时 2-3 小时，必须使用**后台执行 + 轮询**：
   ```bash
-  nohup node scripts/run-pipeline.js "$1" > /workspace/output/runs/pipeline.log 2>&1 &
+  nohup node scripts/run-pipeline.js "$1" > output/runs/pipeline.log 2>&1 &
   ```
-- 每隔 2 分钟检查：`tail -5 /workspace/output/runs/pipeline.log` + `kill -0 <PID>` 判断是否完成
+- 每隔 2 分钟检查：`tail -5 output/runs/pipeline.log` + `kill -0 <PID>` 判断是否完成
 - 如果待搜索 API 为 0（增量模式），pipeline 会秒级完成，可先同步尝试
 - 脚本自动完成：CT.gov REST API 搜索 → CDT 浏览器搜索 → 快照生成 → 报告生成
 - 全量模式下搜索完成会自动将 search_mode 改回 incremental

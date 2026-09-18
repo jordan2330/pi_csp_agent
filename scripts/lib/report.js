@@ -16,7 +16,7 @@ const fs = require('fs');
 const path = require('path');
 const { resolveDosageForm, isOralSolid, isEnterprise } = require('./enrichment');
 
-const WS = '/workspace';
+const WS = path.resolve(__dirname, '..', '..'); // 仓库根目录（本地运行，非容器 /workspace）
 
 // ── Helpers ──
 function truncate(s, max) {

@@ -9,7 +9,7 @@ This is a Pi Coding Agent project for CSP (Aptar active packaging) sales lead di
 - Provider: Aliyun DashScope (百炼) via OpenAI-compatible API
 - Endpoint: `https://dashscope.aliyuncs.com/compatible-mode/v1`
 - Models: `qwen3.7-max` / `deepseek-v4-pro` / `glm-5.2` / `kimi-k2.6` for complex reasoning, `qwen3.7-plus` / `deepseek-v4-flash` for routine tasks
-- Config: `config/models.json` → mounted to `/home/piuser/.pi/agent/models.json` in Docker (容器以宿主机 UID 运行，非 root)
+- Config: 仓库内 `config/models.json` 是版本控制中的源，本地运行时复制到 `~/.pi/agent/models.json`（WSL: `/home/<user>/.pi/agent/models.json`）
 - API key: `DASHSCOPE_API_KEY` environment variable
 - All models use `thinkingFormat: "qwen"` (Aliyun unified endpoint)
 
@@ -17,13 +17,16 @@ This is a Pi Coding Agent project for CSP (Aptar active packaging) sales lead di
 
 - `skills/browser_executor/` — Generic Playwright browser automation tool (shared across all scenarios)
   - `scripts/browser.js` — Playwright 封装（navigate/type/click/wait/select/evaluate/delay/loop/extract/screenshot）
-  - `scripts/cdt-search.js` — chinadrugtrials.org.cn 专用搜索脚本（增量游标 + 详情页提取）
+  - `scripts/browser-connect.js` — 连接解析：真浏览器 CDP 优先，默认端点不可用时自动拉起 Chrome
+  - `scripts/cdt-search-lib.js` — CDT 搜索核心逻辑（增量游标 + 详情页提取，pipeline 直接 require）
+  - `scripts/cdt-search.js` — 同上的 CLI 包装（调试/验证用）
 - `scenarios/` — Business scenario skills (nitrosamine, probiotics, IVD, etc.)
   - `scenarios/<name>/SKILL.md` — 场景指令（pipeline 编排）
   - `scenarios/<name>/scenario.json` — 声明式配置（表头列、CSP推荐矩阵、缓存/报告路径）
   - `scenarios/<name>/enrich.js` — 场景专属 hooks（药物分类、CSP推荐、报告小标题等）
 - `scripts/` — Pipeline 自动化脚本
   - `run-pipeline.js` — 主编排器（Phase 2+3：双源搜索 → 快照 → 报告）
+  - `launch-chrome.sh` — 启动 Windows 侧专用 profile Chrome 并开放 CDP 端点（本地运行必需）
   - `reset-and-search.sh` — 从零全量重置脚本
   - `lib/sources.js` — 数据源统一接口（CT.gov REST API + CDT 浏览器脚本）
   - `lib/enrichment.js` — 剂型检测（英文/中文）、产品名提取
@@ -39,7 +42,7 @@ This is a Pi Coding Agent project for CSP (Aptar active packaging) sales lead di
   - `CSP_Leads_Report.md` — 最终商机报告
   - `runs/YYYY-MM-DD.json` — 运行快照（增量对比用）
   - `runs/errors.log` — 错误日志
-- `pi-home/` — Pi 运行时主目录（Docker bind mount，含 sessions、auth 等，不纳入版本控制）
+- `~/.pi/` — Pi 运行时主目录（sessions、auth、models.json），在本地家目录，不在仓库内
 
 ## Key Conventions
 
@@ -48,8 +51,9 @@ This is a Pi Coding Agent project for CSP (Aptar active packaging) sales lead di
 - Pipeline 核心逻辑在 `scripts/run-pipeline.js` 中，通过 `scenario.json` + `enrich.js` 实现场景无关化
 - Incremental detection: CT.gov 用 NCT ID 集合对比检测新增；CDT 用 `last_cdt_regno` 游标增量搜索，遇到旧数据自动停止翻页
 - FDA data is auto-refreshed each run (page updated quarterly by FDA)
-- 容器以宿主机用户身份运行（entrypoint.sh 自动检测 UID，通过 gosu 降权）
-- 浏览器通过 `BROWSER_ENDPOINT` 环境变量连接远程 browserless（Docker 镜像不含 Chromium）
+- 本地运行（WSL Ubuntu 22），不使用容器；仓库根目录即工作目录，脚本路径一律用 `__dirname` 推导或相对路径，禁止硬编码绝对路径
+- 浏览器采集依赖 Windows 侧真实 Chrome：由 `scripts/launch-chrome.sh` 启动专用 profile（CDP 端口 9223），WSL 需 mirrored 网络模式（`.wslconfig`: `networkingMode=mirrored`）；`BROWSER_ENDPOINT` 可覆盖默认端点
+- CDT 已启用瑞数动态安全（Riverdance：JS 质询 + 浏览器指纹检测），必须使用真实浏览器采集；headless/自动化浏览器会被拦截，且不得注入伪造指纹（伪造值本身是可识别特征）
 
 ## Pipeline Integrity (CRITICAL)
 

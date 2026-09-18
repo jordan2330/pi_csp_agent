@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 
-const { chromium } = require('playwright');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -63,28 +62,26 @@ Output: JSON array of extraction results, in order of extract steps.
 }
 
 async function createBrowser() {
-  let browser;
-
-  if (process.env.BROWSER_ENDPOINT) {
-    browser = await chromium.connectOverCDP(process.env.BROWSER_ENDPOINT);
-  } else {
-    browser = await chromium.launch({
-      headless: true,
-      executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
-      args: STEALTH_ARGS,
-    });
-  }
+  // 端点解析：真浏览器 CDP 优先（见 browser-connect.js）
+  const { connectBrowser } = require('./browser-connect');
+  const { browser, isRealBrowser } = await connectBrowser({
+    launchArgs: STEALTH_ARGS,
+    executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
+  });
 
   const context = await browser.newContext({
     locale: 'zh-CN',
-    viewport: { width: 1280, height: 720 },
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     extraHTTPHeaders: {
       'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
     },
+    ...(isRealBrowser ? { viewport: null } : {
+      viewport: { width: 1280, height: 720 },
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    }),
   });
 
-  await context.addInitScript(STEALTH_INIT_SCRIPT);
+  // 真浏览器不注入伪造指纹（真 Chrome 无自动化痕迹，伪造值反而是可被识别的特征）
+  if (!isRealBrowser) await context.addInitScript(STEALTH_INIT_SCRIPT);
 
   if (fs.existsSync(STATE_FILE)) {
     try {

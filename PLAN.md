@@ -1,5 +1,8 @@
 # 项目检查与优化计划
 
+> **历史文档说明**：本文档记录的是容器化时期（Docker + 远程 browserless）的一次检查优化。
+> 其中涉及的 `/workspace` 路径与容器命令现已不适用（项目已改为 WSL 本地运行 + Windows 真实 Chrome，见 README/AGENTS.md）。
+
 ## Context
 
 对 pi_csp_agent 全仓（pipeline 脚本、lib 通用层、场景 hooks、浏览器脚本、文档）做一次检查与优化。

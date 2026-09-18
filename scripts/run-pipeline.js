@@ -23,16 +23,16 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
 
-const WS = '/workspace';
+// 仓库根目录（本地运行；不再依赖容器内的 /workspace）
+const WS = path.resolve(__dirname, '..');
 const CONFIG_DIR = path.join(WS, 'config');
 const OUTPUT_DIR = path.join(WS, 'output');
 const RUNS_DIR = path.join(OUTPUT_DIR, 'runs');
 const SEARCH_CONFIG = path.join(CONFIG_DIR, 'search-config.json');
 const ERR_LOG = path.join(RUNS_DIR, 'errors.log');
 const CDT_SEARCH_LIB = path.join(WS, 'skills/browser_executor/scripts/cdt-search-lib.js');
-const CDT_WORKER_COUNT = 2; // browserless 并发限制严格, 2 个 worker 更稳定; 每 25 个 API 主动重连回收内存
+const CDT_WORKER_COUNT = 1; // 单 worker：本机真 Chrome + 增量游标，低频行为更像真人（CDT 已启用瑞数反爬）
 
 const CTGOV_DELAY_MS = 800;
 // CDT 节流配置: 从 config/cdt-throttle.json 读取
@@ -301,7 +301,7 @@ async function phase2b_cdt(allApis, isFull) {
   const browsers = [];
   for (let w = 0; w < CDT_WORKER_COUNT; w++) {
     try {
-      if (w > 0) await new Promise(r => setTimeout(r, 2000)); // 错开连接，避免压坱 browserless
+      if (w > 0) await new Promise(r => setTimeout(r, 2000)); // 错开连接，避免同时发起
       const b = await cdtSearchLib.connectBrowser();
       browsers.push(b);
     } catch (e) {
@@ -360,8 +360,8 @@ async function phase2b_cdt(allApis, isFull) {
     return newTrials;
   }
 
-  // ── 主动重连周期 (每 25 个 API 断开重连，强制 Browserless 回收内存) ──
-  const RECONNECT_EVERY = 25;
+  // ── 主动重连周期（默认关闭）
+  const RECONNECT_EVERY = 0;
 
   // ── Worker 函数 ──
   async function runWorker(workerId, apiList, browser) {
@@ -380,8 +380,8 @@ async function phase2b_cdt(allApis, isFull) {
       const cursor = api.last_cdt_regno || '';
       const apiT0 = Date.now();
 
-      // ── 主动重连: 每 N 个 API 断开重连，回收 Browserless 内存 ──
-      if (apisSinceConnect >= RECONNECT_EVERY) {
+      // ── 主动重连（默认关闭，见 RECONNECT_EVERY）
+      if (RECONNECT_EVERY > 0 && apisSinceConnect >= RECONNECT_EVERY) {
         browser = await reconnectBrowser(workerId);
         apisSinceConnect = 0;
       }
@@ -496,6 +496,7 @@ async function phase2b_cdt(allApis, isFull) {
 
   // ── 清理浏览器 ──
   for (let w = 0; w < workerCount; w++) {
+    // 注：CDP 连接下 browser.close() 只断开连接，不会关闭用户的真实 Chrome（已实测）
     try { await browsers[w].close(); } catch (_) {}
   }
 

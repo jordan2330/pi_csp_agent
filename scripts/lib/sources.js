@@ -255,7 +255,9 @@ async function httpGetJSON(url) {
     try {
       return await httpGetOnce(url);
     } catch (err) {
-      const retryable = /timeout|HTTP 429|HTTP 5\d\d|ECONNRESET|ETIMEDOUT|socket hang up/i.test(err.message);
+      // 部分 socket 错误 message 为空，用 code 兜底，否则重试判断与日志都拿不到信息
+      if (!err.message) err.message = err.code || String(err);
+      const retryable = /timeout|HTTP 429|HTTP 5\d\d|ECONNRESET|ETIMEDOUT|socket hang up|ECONNREFUSED|ENOTFOUND|EAI_AGAIN/i.test(err.message);
       if (attempt < MAX_ATTEMPTS && retryable) {
         await new Promise(r => setTimeout(r, 1000 * attempt));
       } else {

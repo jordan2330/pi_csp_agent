@@ -16,8 +16,10 @@ description: 亚硝胺药物商机发掘场景。从FDA页面抓取亚硝胺杂�
 ## 前置条件
 
 - 已加载 `browser-executor` skill
-- Docker 容器已启动，`BROWSER_ENDPOINT` 已配置（指向独立 browserless）
+- **Windows 侧真实 Chrome 已启动**（专用 profile，CDP 端口 9223）：`bash scripts/launch-chrome.sh`（已在运行则直接返回）
+- WSL 为 mirrored 网络模式（`.wslconfig` → `networkingMode=mirrored`），且 playwright 库已安装（`skills/browser_executor/scripts/` 下 `npm i`）
 - `DASHSCOPE_API_KEY` 已配置
+- 原因：CDT 已启用瑞数动态安全（JS 质询 + 指纹检测），headless/自动化浏览器会被拦，必须用真实 Chrome
 
 ---
 
@@ -159,7 +161,7 @@ node skills/browser_executor/scripts/browser.js script /tmp/fda-scrape.json
 
 ```bash
 # 1. 后台启动 pipeline
-nohup node scripts/run-pipeline.js nitrosamine > /workspace/output/runs/pipeline.log 2>&1 &
+nohup node scripts/run-pipeline.js nitrosamine > output/runs/pipeline.log 2>&1 &
 echo "Pipeline PID: $!"
 ```
 
@@ -169,12 +171,12 @@ echo "Pipeline PID: $!"
 kill -0 <PID> 2>/dev/null && echo "运行中" || echo "已完成"
 
 # 查看最新日志
-tail -5 /workspace/output/runs/pipeline.log
+tail -5 output/runs/pipeline.log
 ```
 
 当 pipeline 完成后（进程不存在），检查输出：
 ```bash
-tail -20 /workspace/output/runs/pipeline.log
+tail -20 output/runs/pipeline.log
 ```
 
 **注意**：如果 CT.gov 和 CDT 都已经搜索完成（增量模式下待搜索为 0），pipeline 会在 1 秒内完成，无需后台执行。可以先同步尝试，超时后再转后台。
@@ -188,17 +190,16 @@ tail -20 /workspace/output/runs/pipeline.log
 - 日期过滤：仅保留 2 年内的试验
 - 每个 API 间隔 800ms，约 5-8 分钟完成全部 251 个 API（单次失败自动重试：超时/429/5xx 最多 3 次尝试，递增退避）
 
-#### Phase 2b: CDT 浏览器搜索 (并发 worker + 持久连接)
-- 启动 2 个持久 browserless 浏览器连接（并发，避免 browserless 内存压力）
-- 每个 worker 为每个 API 创建独立 context+page，用完后关闭
-- 每 25 个 API 主动断开 WebSocket 重连（强制 Browserless 回收内存）
-- 将 235 个 API 均匀分配到 2 个 worker，并行搜索
+#### Phase 2b: CDT 浏览器搜索（本机真实 Chrome + 单 worker）
+- 通过 CDP 连接 Windows 侧真实 Chrome（端点由 `browser-connect.js` 解析；真浏览器模式不覆盖 UA/viewport，也不注入伪造指纹）
+- **单 worker**（`run-pipeline.js` 中 `CDT_WORKER_COUNT = 1`）：CDT 已启用瑞数反爬，低频单线程行为更像真人
+- 每个 API 创建独立 context+page，用完关闭；页面级断连自动重建 session 重试
 - 调用 `scripts/lib/sources.cdtSearchOneAPI()` → `skills/browser_executor/scripts/cdt-search-lib.js`
 - 用中文名搜索，提取：产品名称（drugName）、剂型（中文后缀识别）、试验分期、企业联系方式
 - 每 API 参数：`maxPages: 5, batchSize: 50`
 - API 间延迟: 5-8s（配置在 `config/cdt-throttle.json`）
-- 浏览器断连时自动重建 session 并重试，断连严重时 pipeline 层重连整个 browser
-- 约 1.5-2 小时完成全部 235 个 API（2 worker 并发，持久连接）
+- 全量（首次/重扫）约 3-4 小时；增量模式无新增时每 API 仅翻 1-2 页，通常几十分钟完成
+- 如确需提速可临时把 `CDT_WORKER_COUNT` 调到 2（代价：并发行为更容易被风控识别）
 
 #### Phase 3: 快照 + 报告
 - **增量检测：对比前次快照标记 isNew；同日二次运行对比当天已有快照，避免重复汇报新增**
@@ -239,16 +240,28 @@ Pipeline 脚本执行完毕后：
 
 ## 日常运维
 
-### 定时运行（headless 模式）
+### 定时运行（非交互模式）
 
 ```bash
+# 前置：确保 Chrome 已启动（bash scripts/launch-chrome.sh）
+
 # 增量模式（默认），只搜索新 API
-docker compose run --rm csp-agent pi -p "/lead-scan nitrosamine"
+pi -p "/lead-scan nitrosamine"
 
 # 全量模式（需要先改配置）
 # 1. 编辑 config/search-config.json，search_mode 改为 "full"
 # 2. 运行
-docker compose run --rm csp-agent pi -p "/lead-scan nitrosamine"
+pi -p "/lead-scan nitrosamine"
+```
+
+### 长任务托管（全量 3-4 小时，避免终端关闭中断）
+
+```bash
+loginctl enable-linger $USER   # 一次性：让用户级 systemd 服务在无会话时继续运行
+systemd-run --user --unit=csp-scan bash -lc \
+  'cd ~/agents/pi_csp_agent_v3 && node scripts/run-pipeline.js nitrosamine'
+systemctl --user status csp-scan     # 查看状态
+journalctl --user -u csp-scan -f     # 跟踪日志
 ```
 
 ### 手动触发单源重扫

@@ -12,3 +12,6 @@ test/
 /20260616_*.md
 /CSP.md
 /config/fda_nitrosamines.json
+
+# playwright-cli 运行时目录（snapshot 等）
+.playwright-cli/
