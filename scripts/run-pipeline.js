@@ -598,7 +598,7 @@ async function main() {
   // ── 全量模式自动切回增量 ──
   if (isFull) {
     searchConfig.search_mode = 'incremental';
-    fs.writeFileSync(SEARCH_CONFIG, JSON.stringify(searchConfig, null, 2));
+    fs.writeFileSync(SEARCH_CONFIG, JSON.stringify(searchConfig) + '\n');  // 紧凑格式，与仓库入库格式一致（避免每次全量跑完都弄脏工作区）
     log('全量搜索完成，已将 search_mode 改回 incremental');
   }
 
