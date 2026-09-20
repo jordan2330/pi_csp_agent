@@ -1,5 +1,5 @@
 /**
- * Excel / CSV 导出（通用渲染器，由 scenarios/<name>/scenario.json 驱动）
+ * Excel 导出（通用渲染器，由 scenarios/<name>/scenario.json 驱动）
  *
  * 输出（Sheet 顺序即业务优先级）：
  *   1. 概览          统计 + 用法 + 数据局限说明
@@ -7,7 +7,6 @@
  *   3. P2-其他剂型     非 OSD，同样按 Cat 1→5 分段
  *   4. 全部商机        扁平表（一行 = 一条试验）→ 数据透视 / 图表用
  *   5. 按API汇总       一行 = 一个 API（管理视角）
- * 另导出扁平 CSV（同"全部商机"，给 BI / 脚本用）
  *
  * 说明：OSD+Cat1 等组合视图不需要单独 sheet——用 Excel 自动筛选（首行已开启）即可秒出。
  */
@@ -259,21 +258,10 @@ function generateWorkbook(snapshot, scenario, isFull) {
   buildApiSheet(wb, ctx, isFull);
 
   const xlsxPath = path.join(WS, ctx.config.report_xlsx || 'output/CSP_Leads_Report.xlsx');
-  const csvPath = path.join(WS, ctx.config.report_csv || 'output/CSP_Leads_Report.csv');
-
-  // CSV：复用扁平表（单 sheet）——与 xlsx 一起写完再返回，避免进程提前退出丢文件
-  const csvWb = new ExcelJS.Workbook();
-  const csvWs = csvWb.addWorksheet('全部商机');
-  csvWs.columns = HEADERS;
-  rows.forEach(r => csvWs.addRow(r));
 
   fs.mkdirSync(path.dirname(xlsxPath), { recursive: true });
-  fs.mkdirSync(path.dirname(csvPath), { recursive: true });
-  return Promise.all([
-    wb.xlsx.writeFile(xlsxPath),
-    csvWb.csv.writeFile(csvPath)
-  ]).then(() => ({
-    xlsxPath, csvPath,
+  return wb.xlsx.writeFile(xlsxPath).then(() => ({
+    xlsxPath,
     rows: rows.length,
     p1: rows.filter(r => r.osd).length,
     p2: rows.filter(r => !r.osd).length

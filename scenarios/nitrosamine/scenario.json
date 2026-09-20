@@ -3,7 +3,6 @@
   "title": "CSP 商机发掘报告 — 亚硝胺",
   "report_file": "output/CSP_Leads_Report.md",
   "report_xlsx": "output/CSP_Leads_Report.xlsx",
-  "report_csv": "output/CSP_Leads_Report.csv",
   "cache_file": "config/fda_nitrosamines.json",
   "cache_version_field": "fda_page_version",
   "lookback_years": 1,

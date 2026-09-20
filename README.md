@@ -96,8 +96,6 @@ pi
 # 主交付物 — 销售用的 Excel（OSD 优先分组 + 自动筛选 + 可透视）
 ls -la output/CSP_Leads_Report.xlsx
 
-# 扁平 CSV — 给 BI / 脚本 / 自定义透视用
-head -3 output/CSP_Leads_Report.csv
 
 # Markdown — 文本存档（pi 读它做摘要）
 cat output/CSP_Leads_Report.md
@@ -134,7 +132,7 @@ cat config/fda_nitrosamines.json | python3 -m json.tool | head -20
 
 **报告字段**：产品名称（CDT 中文商品名 / CT.gov 干预名）、剂型（⭐口服固体加粗）、药物分类（仿制药/原研药/新药/新药（改良型）/观察性研究）、企业联系方式（联系人/电话/邮箱/地址）、试验状态、登记号与日期、来源（CDT/CT.gov）、本次是否新增。
 
-**模式差异**：增量模式下三个交付物（xlsx/csv/md）**都只含新增商机**（Excel sheet 名带 `新增-` 前缀）；全量模式才含完整列表。
+**模式差异**：增量模式下两个交付物（xlsx/md）**都只含新增商机**（Excel sheet 名带 `新增-` 前缀）；全量模式才含完整列表。
 
 ### 全量搜索（首次部署）
 
@@ -332,7 +330,7 @@ pi-csp-agent/
 │       ├── enrichment.js              # 剂型检测 / 产品名抽取
 │       ├── snapshot.js                # 快照 + 增量检测
 │       ├── report.js                  # Markdown 渲染器
-│       └── report-xlsx.js             # Excel(5 sheet)/CSV 渲染器
+│       └── report-xlsx.js             # Excel(5 sheet) 渲染器
 ├── prompts/lead-scan.md               # 入口命令 /lead-scan <scenario>
 └── output/
     ├── CSP_Leads_Report.md            # 商机报告

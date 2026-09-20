@@ -205,7 +205,7 @@ tail -20 output/runs/pipeline.log
 #### Phase 3: 快照 + 报告
 - **增量检测：对比前次快照标记 isNew；同日二次运行对比当天已有快照，避免重复汇报新增**
 - 从 `config/fda_nitrosamines.json` 生成快照到 `output/runs/YYYY-MM-DD.json`
-- 调用 `scripts/lib/report.js`（Markdown）与 `scripts/lib/report-xlsx.js`（Excel + CSV）两个通用渲染器，均由 `scenarios/nitrosamine/scenario.json` + `enrich.js` 驱动
+- 调用 `scripts/lib/report.js`（Markdown）与 `scripts/lib/report-xlsx.js`（Excel）两个通用渲染器，均由 `scenarios/nitrosamine/scenario.json` + `enrich.js` 驱动
 - **交付物**：
   - `output/CSP_Leads_Report.xlsx` — **主交付物**（销售用），5 个 sheet：
     | Sheet | 内容 |
@@ -215,11 +215,10 @@ tail -20 output/runs/pipeline.log
     | P2-其他剂型 | 非 OSD，同样按 Cat 分段 |
     | 全部商机 | 扁平表（一行 = 一条试验）→ 数据透视/图表用 |
     | 按API汇总 | 一行 = 一个 API（试验数/企业数/OSD 数/推荐方案）|
-  - `output/CSP_Leads_Report.csv` — 扁平 CSV（同「全部商机」，给 BI/脚本用）
   - `output/CSP_Leads_Report.md` — Markdown（pi 读取摘要 / 文本存档）
 - **优先度规则**：OSD+Cat1 → OSD+Cat2/3/4/5 → 其他剂型+Cat1/2/3/4/5（Sheet 顺序即优先级；组合视图用 Excel 自动筛选可秒出，不单独拆 sheet）
 - **CSP 推荐方案按剂型给出候选组合**（依据 CSP 产品选型准则：包装形态优先），并标注需销售向客户确认的信息（如泡罩线 vs 瓶装线）；风险等级只决定优先级
-- **增量模式三个交付物都只含新增商机**（Sheet 名前缀 `新增-`）；全量商机列表仅在 `search_mode: full` 时输出
+- **增量模式两个交付物都只含新增商机**（Sheet 名前缀 `新增-`）；全量商机列表仅在 `search_mode: full` 时输出
 
 ### 脚本退出码
 
@@ -240,7 +239,7 @@ tail -20 output/runs/pipeline.log
 
 Pipeline 脚本执行完毕后：
 
-1. **读取报告**：`cat output/CSP_Leads_Report.md`，向用户汇报结果摘要；并告知 Excel/CSV 路径
+1. **读取报告**：`cat output/CSP_Leads_Report.md`，向用户汇报结果摘要；并告知 Excel 路径
 2. **检查错误日志**：`cat output/runs/errors.log`（如存在），汇报失败的 API
 3. **输出总结**：
    - 总 API 数量 / 有临床试验的 API 数量
@@ -310,7 +309,6 @@ node scripts/run-pipeline.js nitrosamine
 | `output/runs/YYYY-MM-DD.json` | 运行快照（用于增量对比） |
 | `output/runs/errors.log` | 搜索错误日志 |
 | `output/CSP_Leads_Report.xlsx` | **主交付物**：Excel（5 sheet，OSD 优先分组） |
-| `output/CSP_Leads_Report.csv` | 扁平 CSV（透视/BI/脚本用） |
 | `output/CSP_Leads_Report.md` | Markdown 报告（文本存档 / pi 摘要） |
 
 ### 双源搜索状态跟踪

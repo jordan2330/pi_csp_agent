@@ -103,7 +103,7 @@ function heading(api, tpl, config) {
     .replace('{trialCount}', api.trialCount);
 }
 
-// ── 构建报表数据模型（Markdown / Excel / CSV 渲染器共用）──
+// ── 构建报表数据模型（Markdown / Excel 渲染器共用）──
 function buildLeadModel(snapshot, scenario, isFull) {
   const { config, hooks } = scenario;
   const today = new Date().toISOString().slice(0, 10);

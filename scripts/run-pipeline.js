@@ -549,14 +549,13 @@ async function phase3_report(isFull) {
     if (e.stack) log(e.stack.substring(0, 500));
   }
 
-  // ── Excel + CSV（主交付物：销售可直接筛选/透视）──
+  // ── Excel（主交付物：销售可直接筛选/透视）──
   try {
     const xlsxLib = require(path.join(__dirname, 'lib', 'report-xlsx.js'));
     const r = await xlsxLib.generateWorkbook(snapshot, scenario, isFull);
     log(`Excel 已生成: ${r.xlsxPath} （P1-口服固体 ${r.p1} 条 / P2-其他剂型 ${r.p2} 条）`);
-    log(`CSV 已生成: ${r.csvPath}`);
   } catch (e) {
-    log(`Excel/CSV 生成失败: ${e.message}（如缺依赖请执行 npm i 安装 exceljs）`);
+    log(`Excel 生成失败: ${e.message}（如缺依赖请执行 npm i 安装 exceljs）`);
   }
 }
 
