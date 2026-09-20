@@ -2,6 +2,8 @@
   "name": "nitrosamine",
   "title": "CSP 商机发掘报告 — 亚硝胺",
   "report_file": "output/CSP_Leads_Report.md",
+  "report_xlsx": "output/CSP_Leads_Report.xlsx",
+  "report_csv": "output/CSP_Leads_Report.csv",
   "cache_file": "config/fda_nitrosamines.json",
   "cache_version_field": "fda_page_version",
   "lookback_years": 1,
@@ -37,6 +39,39 @@
       "4": "3-Phase Activ-Polymer™ / Activ-Vial®",
       "5": "Activ-Vial® / Activ-Film®"
     }
+  },
+  "dosage_form_groups": {
+    "口服固体制剂(片剂)": "osd",
+    "口服固体制剂(胶囊)": "osd",
+    "口服固体制剂(丸剂)": "osd",
+    "口服固体制剂(颗粒/散剂)": "granule",
+    "改良释放制剂": "mr",
+    "改良释放制剂(片剂)": "mr",
+    "改良释放制剂(胶囊)": "mr",
+    "改良释放制剂(颗粒)": "mr",
+    "吸入制剂(粉末)": "inhaled_powder",
+    "吸入制剂": "inhaled",
+    "外用制剂": "topical",
+    "注射制剂": "injection",
+    "口服液体制剂": "oral_liquid",
+    "口服制剂": "oral_other",
+    "鼻用制剂": "nasal",
+    "眼用制剂": "ophthalmic",
+    "栓剂": "suppository"
+  },
+  "csp_by_dosage_group": {
+    "osd": { "candidates": ["Activ-Blister®（泡罩线）", "Activ-Vial®（瓶装线）"], "confirm": "包装形态（泡罩/瓶装）" },
+    "mr": { "candidates": ["Activ-Blister®（泡罩线）", "3-Phase Activ-Polymer™"], "confirm": "包装形态（泡罩/瓶装）" },
+    "granule": { "candidates": ["Activ-Sachet®", "Activ-Film®"], "confirm": "包装形态（袋装/散装）" },
+    "inhaled_powder": { "candidates": ["Activ-Blister®（胶囊泡罩）"], "confirm": "包装形态（DPI 胶囊/泡罩）" },
+    "topical": { "candidates": ["Activ-Film®（贴片/柔性包装）"], "confirm": "包装形态（贴片/软管）" },
+    "oral_liquid": { "candidates": ["需评估（瓶装+瓶盖干燥剂可能性）"], "confirm": "包装形态" },
+    "inhaled": { "candidates": ["需评估（压力/雾化装置非 CSP 主战场）"], "confirm": null },
+    "injection": { "candidates": ["低相关（玻璃瓶/胶塞体系，非吸湿敏感）"], "confirm": null },
+    "nasal": { "candidates": ["需评估"], "confirm": null },
+    "ophthalmic": { "candidates": ["需评估"], "confirm": null },
+    "suppository": { "candidates": ["需评估"], "confirm": null },
+    "oral_other": { "candidates": ["需评估（口服但剂型不明）"], "confirm": "剂型/包装形态" }
   },
   "tables": {
     "new_leads": {

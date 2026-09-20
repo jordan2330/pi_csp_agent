@@ -5,8 +5,8 @@
  * 通用 report.js 通过约定接口调用它们；将来其他场景提供自己的 enrich.js。
  *
  * hooks：
- *   classifyTrial(trial)            → 药物分类（仿制药/原研药/新药/改良新药）
- *   recommendCSP(api, config)       → CSP 推荐方案（按 potency category 查表）
+ *   classifyTrial(trial)            → 药物分类（仿制药/原研药/新药/改良新药/观察性研究）
+ *   recommendCSP(api, config)       → CSP 推荐方案：{ text, confirm }（以剂型为主，见下）
  *   newLeadSubtitle(api, config)     → 新增商机小标题行（> ...）
  *   fullLeadSubtitle(api, config)    → 全量商机小标题行（> ...）
  *   categoryHeader(cat, config)      → 风险分类标题（### ...）
@@ -25,47 +25,66 @@ const originatorCompanies = new Set([
 ]);
 
 // ── Drug classification inference ──
+// ── Drug classification inference（规则基于真实 phase/trialType 取值）──
+//   CDT: phase="其它 其他说明:生物等效性试验" | "I期/II期/III期"（trialType 含 生物等效/药代动力学/安全性和有效性）
+//   CT.gov: phase="PHASE1/2/3/4" | "NA" | ""（trialType: INTERVENTIONAL / OBSERVATIONAL）
 function classifyTrial(trial) {
   const phase = trial.phase || '';
   const trialType = trial.trialType || '';
   const sponsor = trial.sponsor || '';
   const drugName = trial.drugName || '';
-
-  // ── 仿制药：生物等效性试验（BE）或一致性评价 ──
-  if (phase === '其他-BE' || phase === 'BE') return '仿制药';
-  if (/生物等效|生物利用度|一致性评价/.test(trialType)) return '仿制药';
-
-  // ── 原研药：原研企业 + 后期临床 ──
+  const title = `${trial.briefTitle || ''} ${trial.officialTitle || ''}`;
   const isOriginator = originatorCompanies.has(sponsor);
-  if (isOriginator && (phase === 'III期' || phase === 'IV期' ||
-      phase === 'PHASE3' || phase === 'PHASE4')) {
-    return '原研药';
-  }
 
-  // ── 新药/改良新药：I期临床 ──
-  if (phase === 'I期' || phase === 'PHASE1') {
-    if (drugName.includes('缓释') || drugName.includes('控释') || drugName.includes('肠溶') ||
-        drugName.includes('新规格') || drugName.includes('改良')) {
-      return '新药（改良型）';
-    }
-    if (sponsor.includes('创新') || sponsor.includes('新药') || sponsor.includes('生物科技')) {
-      return '新药';
-    }
-  }
+  // ── 仿制药：BE / 生物利用度 / 一致性评价 ──
+  if (/生物等效|生物利用度|一致性评价|\bBE\b/i.test(trialType)) return '仿制药';
+  if (/生物等效|一致性评价|bioequivalen/i.test(title)) return '仿制药';
+  if (/生物等效|\bBE\b|其他-BE/.test(phase)) return '仿制药';
 
-  return null;
+  // ── 观察性研究：非干预性，通常不是包装变更线索（显式标注，不留空） ──
+  if (/OBSERVATIONAL/i.test(trialType)) return '观察性研究';
+
+  // ── 改良型新药：剂型/复方改良特征 ──
+  if (/缓释|控释|肠溶|迟释|缓控释|复方|口崩|分散片|咀嚼|双层|速释/.test(drugName)) return '新药（改良型）';
+
+  const isLatePhase = /PHASE\s?(2|3|4)/.test(phase.toUpperCase()) || /^(II|III|IV)期/.test(phase);
+  const isAnyPhase = /PHASE\s?(1|2|3|4)/.test(phase.toUpperCase()) || /^(I|II|III|IV)期/.test(phase);
+
+  // ── 原研药：原研企业 + 中后期临床 ──
+  if (isOriginator && isLatePhase) return '原研药';
+
+  // ── 新药：干预性 I–III 期（非原研企业） ──
+  if (isAnyPhase) return isOriginator ? '原研药' : '新药';
+
+  // ── 其余（干预性但无分期 / 数据缺失）- 显式标为未分类 ──
+  return '未分类';
 }
 
-// ── CSP recommendation by potency category ──
+// ── CSP 推荐方案：以剂型为主（CSP 选型第一准则是包装形态），风险等级只决定优先级 ──
+// 返回 { text, confirm }：text=候选方案组合；confirm=需销售确认的信息（如“包装形态”）
 function recommendCSP(api, config) {
-  const csp = config.category.csp_by_category;
-  return csp[api.potency_category] || null;
+  const map = config.csp_by_dosage_group || {};
+  const entry = map[api.dosageGroup];
+  if (entry && entry.candidates && entry.candidates.length > 0) {
+    return { text: entry.candidates.join(' / '), confirm: entry.confirm || null };
+  }
+  // 兜底：剂型未知 → 回到按风险等级（历史行为）
+  const byCat = (config.category.csp_by_category || {})[api.potency_category];
+  return byCat ? { text: byCat, confirm: '剂型/包装形态' } : { text: '需评估', confirm: '剂型/包装形态' };
+}
+
+// ── Subtitle 片段：推荐方案 + 待确认项 ──
+function cspPart(api) {
+  if (!api.csp_recommendation) return '';
+  let s = `推荐CSP方案: **${api.csp_recommendation}**`;
+  if (api.csp_confirm) s += `（待确认: ${api.csp_confirm}）`;
+  return s;
 }
 
 // ── New leads subtitle (the `> ...` line) ──
 function newLeadSubtitle(api, config) {
   const labels = config.category.labels;
-  let s = `> FDA风险等级: ${labels[api.potency_category]}(Cat ${api.potency_category}) | AI Limit: ${api.ai_limit} | 推荐CSP方案: **${api.csp_recommendation}**`;
+  let s = `> FDA风险等级: ${labels[api.potency_category]}(Cat ${api.potency_category}) | AI Limit: ${api.ai_limit} | ${cspPart(api)}`;
   if (api.oralSolidCount > 0) {
     s += ` | ⭐口服固体: ${api.oralSolidCount}条`;
   }
@@ -74,7 +93,7 @@ function newLeadSubtitle(api, config) {
 
 // ── Full leads subtitle (the `> ...` line) ──
 function fullLeadSubtitle(api, config) {
-  let s = `> 推荐CSP方案: **${api.csp_recommendation}**`;
+  let s = `> ${cspPart(api)}`;
   if (api.cdtSponsors.length > 0) {
     s += ` | CDT来源企业: ${api.cdtSponsors.length}家（含联系方式）`;
   }
@@ -92,30 +111,21 @@ function categoryHeader(cat, config) {
   return `### ${labels[cat]} (Cat ${cat}) — AI Limit: ${limitRange} ng/day`;
 }
 
-// ── Compute dosage form stats (scenario-specific categories + markers) ──
+// ── Compute dosage form stats ──
+// 输出：OSD（含改良释放）/ 其他剂型 / 未识别 三大类 + 细项
 function computeFormStats(enrichedApis) {
-  const formStats = {
-    '口服固体制剂(片剂)': 0, '口服固体制剂(胶囊)': 0, '口服固体制剂(颗粒/散剂)': 0,
-    '改良释放制剂': 0, '吸入制剂': 0, '注射制剂': 0, '口服液体制剂': 0,
-    '外用制剂': 0, '鼻用制剂': 0, '其他': 0, '未识别': 0
-  };
+  const detail = {};
+  let osd = 0, other = 0, unknown = 0;
   for (const api of Object.values(enrichedApis)) {
     for (const t of api.trials) {
       const form = t.dosageForm;
-      if (!form) { formStats['未识别']++; continue; }
-      if (form.startsWith('口服固体制剂(片剂)')) formStats['口服固体制剂(片剂)']++;
-      else if (form.startsWith('口服固体制剂(胶囊)')) formStats['口服固体制剂(胶囊)']++;
-      else if (form.startsWith('口服固体制剂(颗粒')) formStats['口服固体制剂(颗粒/散剂)']++;
-      else if (form.startsWith('改良释放')) formStats['改良释放制剂']++;
-      else if (form.startsWith('吸入')) formStats['吸入制剂']++;
-      else if (form.startsWith('注射')) formStats['注射制剂']++;
-      else if (form.startsWith('口服液')) formStats['口服液体制剂']++;
-      else if (form.startsWith('外用')) formStats['外用制剂']++;
-      else if (form.startsWith('鼻用')) formStats['鼻用制剂']++;
-      else formStats['其他']++;
+      if (!form) { unknown++; detail['未识别'] = (detail['未识别'] || 0) + 1; continue; }
+      detail[form] = (detail[form] || 0) + 1;
+      if (/口服固体|改良释放/.test(form)) osd++;
+      else other++;
     }
   }
-  return formStats;
+  return { osd, other, unknown, detail };
 }
 
 // ── Overview section (scenario-specific presentation) ──
@@ -135,15 +145,14 @@ function renderOverview(ctx) {
   md += `- 数据源分布:\n`;
   md += `  - CDT ${cdtCount} 条（${cdtWithContact} 条含联系方式）\n`;
   md += `  - CT.gov ${ctgovCount} 条（${ctgovWithContact} 条含联系方式）\n`;
-  md += `- **剂型分布**（CSP重点关注口服固体制剂）:\n`;
-  const formStats = computeFormStats(enrichedApis);
-  const formEntries = Object.entries(formStats).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
-  formEntries.forEach(([form, count]) => {
-    const pct = (count / totalLeads * 100).toFixed(1);
-    const marker = form.includes('口服固体') || form === '改良释放制剂' ? ' ⭐' : '';
-    md += `  - ${form}: **${count}**条 (${pct}%)${marker}\n`;
-  });
-  md += `  - 💊 **口服固体制剂合计: ${oralSolidCount}条 (${(oralSolidCount / totalLeads * 100).toFixed(1)}%)**\n\n`;
+  md += `- **剂型分布**（优先级：OSD 优先）:\n`;
+  const fs2 = computeFormStats(enrichedApis);
+  md += `  - ⭐ **口服固体制剂(含改良释放): ${fs2.osd}条 (${(fs2.osd / totalLeads * 100).toFixed(1)}%)**\n`;
+  md += `  - 其他剂型: ${fs2.other}条 (${(fs2.other / totalLeads * 100).toFixed(1)}%)\n`;
+  md += `  - 未识别: ${fs2.unknown}条 (${(fs2.unknown / totalLeads * 100).toFixed(1)}%) — 多为观察性研究（药物仅作背景，无剂型意义）\n`;
+  Object.entries(fs2.detail).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1])
+    .forEach(([form, count]) => { md += `    - ${form}: ${count}条\n`; });
+  md += `\n`;
   return md;
 }
 

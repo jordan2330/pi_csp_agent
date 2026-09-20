@@ -93,7 +93,13 @@ pi
 ## 查看产出物
 
 ```bash
-# 主报告 — 销售直接看的 Markdown 文件
+# 主交付物 — 销售用的 Excel（OSD 优先分组 + 自动筛选 + 可透视）
+ls -la output/CSP_Leads_Report.xlsx
+
+# 扁平 CSV — 给 BI / 脚本 / 自定义透视用
+head -3 output/CSP_Leads_Report.csv
+
+# Markdown — 文本存档（pi 读它做摘要）
 cat output/CSP_Leads_Report.md
 
 # 运行快照 — 每次运行的完整数据，用于增量对比
@@ -103,15 +109,32 @@ ls output/runs/
 cat config/fda_nitrosamines.json | python3 -m json.tool | head -20
 ```
 
-报告结构：
-- **概览**：API 数量、临床试验数量、按风险等级分布、数据源分布、**剂型分布统计**
-- **新增商机**：本次运行新发现的客户（最前面），含产品名称、剂型和药物分类
-- **全量列表**：按 FDA Potency Cat 1→5 分组，每个API含：
-  - **产品名称**：CDT 来源显示中文商品名（如“西格列汀二甲双胍缓释片”），CT.gov 来源显示英文干预名称（如“Sitagliptin 100mg”）
-  - **剂型**：口服固体制剂(片剂/胶囊)、改良释放制剂、吸入制剂、注射制剂等；⭐口服固体加粗高亮
-  - **企业联系方式**：联系人、电话、邮箱、地址（CDT + CT.gov 双源均有）
-  - **药物分类**：仿制药/原研药/新药/新药（改良型）
-  - **来源标注**：CDT（含联系方式）或 CT.gov（含联系方式）
+### Excel 结构（主交付物）
+
+| Sheet | 内容 | 用法 |
+|---|---|---|
+| 概览 | 统计 + 优先级说明 + **数据局限** | 先看这张 |
+| P1-口服固体 | OSD（含改良释放/颗粒散剂），**按 AI limit Cat 1→5 分段**，段内企业数降序、进行中试验优先 | 销售主战场：Cat 1 排最前 |
+| P2-其他剂型 | 非 OSD，同样按 Cat 分段 | 次优先 |
+| 全部商机 | 扁平表（一行 = 一条试验，22 列） | 数据透视 / 图表 |
+| 按API汇总 | 一行 = 一个 API（试验数/企业数/OSD 数/推荐方案） | 管理视角 |
+
+**优先度**：OSD+Cat1 → OSD+Cat2/3/4/5 → 其他剂型+Cat1/2/3/4/5（Sheet 顺序即优先级）。
+需要「OSD+Cat1」单独视图？在 P1 sheet 用「风险等级」列筛选即可（首行已开自动筛选），不需要拆成 10 张 sheet。
+
+**CSP 推荐方案按剂型给出候选组合**（依据 CSP 产品选型准则：**包装形态优先**），例如：
+
+| 剂型 | 候选方案 | 待确认 |
+|---|---|---|
+| 口服固体制剂(片剂/胶囊) | Activ-Blister®（泡罩线）/ Activ-Vial®（瓶装线） | 包装形态 |
+| 改良释放制剂 | Activ-Blister® / 3-Phase Activ-Polymer™ | 包装形态 |
+| 颗粒/散剂 | Activ-Sachet® / Activ-Film® | 包装形态 |
+| 透皮贴剂/柔性包装 | Activ-Film® | 包装形态 |
+| 注射/气雾剂 | 标注「低相关/需评估」，不再硬塞产品 | — |
+
+**报告字段**：产品名称（CDT 中文商品名 / CT.gov 干预名）、剂型（⭐口服固体加粗）、药物分类（仿制药/原研药/新药/新药（改良型）/观察性研究）、企业联系方式（联系人/电话/邮箱/地址）、试验状态、登记号与日期、来源（CDT/CT.gov）、本次是否新增。
+
+**模式差异**：增量模式下三个交付物（xlsx/csv/md）**都只含新增商机**（Excel sheet 名带 `新增-` 前缀）；全量模式才含完整列表。
 
 ### 全量搜索（首次部署）
 
@@ -308,7 +331,8 @@ pi-csp-agent/
 │       ├── sources.js                 # CT.gov REST + CDT 浏览器采集
 │       ├── enrichment.js              # 剂型检测 / 产品名抽取
 │       ├── snapshot.js                # 快照 + 增量检测
-│       ── report.js                  # 通用报告渲染器
+│       ├── report.js                  # Markdown 渲染器
+│       └── report-xlsx.js             # Excel(5 sheet)/CSV 渲染器
 ├── prompts/lead-scan.md               # 入口命令 /lead-scan <scenario>
 └── output/
     ├── CSP_Leads_Report.md            # 商机报告

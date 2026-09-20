@@ -29,9 +29,10 @@ This is a Pi Coding Agent project for CSP (Aptar active packaging) sales lead di
   - `launch-chrome.sh` — 启动 Windows 侧专用 profile Chrome 并开放 CDP 端点（本地运行必需）
   - `reset-and-search.sh` — 从零全量重置脚本
   - `lib/sources.js` — 数据源统一接口（CT.gov REST API + CDT 浏览器脚本）
-  - `lib/enrichment.js` — 剂型检测（英文/中文）、产品名提取
+  - `lib/enrichment.js` — 剂型检测（中英文，词干匹配兼容复数/派生词）、产品名提取、剂型分组
   - `lib/snapshot.js` — 快照管理 + 增量检测
   - `lib/report.js` — 通用 Markdown 报告渲染器（由 scenario.json + enrich.js 驱动）
+  - `lib/report-xlsx.js` — 通用 Excel/CSV 渲染器（5 sheet：概览 / P1-口服固体 / P2-其他剂型 / 全部商机 / 按API汇总）
 - `prompts/` — Pi prompt templates (entry points like `/lead-scan`)
 - `config/` — Cached data and model configuration
   - `models.json` — LLM 模型配置
@@ -39,7 +40,9 @@ This is a Pi Coding Agent project for CSP (Aptar active packaging) sales lead di
   - `search-config.json` — 搜索模式控制（full / incremental）
   - `fda_nitrosamines.json` — FDA 缓存（运行时生成，不纳入版本控制）
 - `output/` — Generated reports and run snapshots
-  - `CSP_Leads_Report.md` — 最终商机报告
+  - `CSP_Leads_Report.xlsx` — **主交付物**（销售用 Excel：OSD 优先分组 + 自动筛选 + 可透视）
+  - `CSP_Leads_Report.csv` — 扁平 CSV（透视/BI/脚本用）
+  - `CSP_Leads_Report.md` — Markdown 报告（文本存档 / pi 摘要）
   - `runs/YYYY-MM-DD.json` — 运行快照（增量对比用）
   - `runs/errors.log` — 错误日志
 - `~/.pi/` — Pi 运行时主目录（sessions、auth、models.json），在本地家目录，不在仓库内
@@ -67,6 +70,7 @@ This is a Pi Coding Agent project for CSP (Aptar active packaging) sales lead di
 
 ## Report Output Rules
 
-- **增量模式 (`search_mode: incremental`)**: 报告只输出「新增商机」部分，不包含全量商机列表。全量数据过大，避免每次推送冗余内容。
+- **增量模式 (`search_mode: incremental`)**: 报告只输出「新增商机」部分，不包含全量商机列表。全量数据过大，避免每次推送冗余内容。**三种交付物（xlsx / csv / md）均遵守此规则**（Excel sheet 名前缀 `新增-`）。
 - **全量模式 (`search_mode: full`)**: 报告同时包含「新增商机」和「全量商机列表」。需要查看完整商机时使用此模式。
 - 此行为是项目设计约束，不可擅自修改。如需全量报告，临时设置 `search_mode: full` 后运行即可。
+- **Excel 优先度排序（业务规则）**：口服固体制剂(OSD，含改良释放/颗粒散剂) 优先，按 AI limit 风险等级 Cat 1→5 分段；其次为其他剂型同样分段。CSP 推荐方案按**剂型**给出候选组合（依据 CSP 产品选型准则：包装形态优先），风险等级只决定优先级。

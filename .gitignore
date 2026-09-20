@@ -15,3 +15,6 @@ test/
 
 # playwright-cli 运行时目录（snapshot 等）
 .playwright-cli/
+# 报告产物（含 Excel/CSV）
+output/CSP_Leads_Report.xlsx
+output/CSP_Leads_Report.csv

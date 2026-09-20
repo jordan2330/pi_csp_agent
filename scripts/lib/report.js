@@ -14,7 +14,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { resolveDosageForm, isOralSolid, isEnterprise } = require('./enrichment');
+const { resolveDosageForm, isOralSolid, isEnterprise, dosageFormGroup } = require('./enrichment');
 
 const WS = path.resolve(__dirname, '..', '..'); // 仓库根目录（本地运行，非容器 /workspace）
 
@@ -103,8 +103,8 @@ function heading(api, tpl, config) {
     .replace('{trialCount}', api.trialCount);
 }
 
-// ── Main ──
-function generateReport(snapshot, scenario, isFull) {
+// ── 构建报表数据模型（Markdown / Excel / CSV 渲染器共用）──
+function buildLeadModel(snapshot, scenario, isFull) {
   const { config, hooks } = scenario;
   const today = new Date().toISOString().slice(0, 10);
 
@@ -148,13 +148,17 @@ function generateReport(snapshot, scenario, isFull) {
   let totalNewLeads = 0;
 
   apisWithLeads.forEach(apiName => {
-    const rawTrials = (filteredResults[apiName] || []).map(t => ({
-      ...t,
-      drugClassification: t.drugClassification || (hooks.classifyTrial ? hooks.classifyTrial(t) : null),
-      dosageForm: resolveDosageForm(t),
-      indication: t.indication || (t.source === 'CDT' ? t.briefTitle : (t.condition || t.briefTitle)) || '',
-      phase: t.phase || ''
-    }));
+    const rawTrials = (filteredResults[apiName] || []).map(t => {
+      const dosageForm = resolveDosageForm(t);
+      return {
+        ...t,
+        drugClassification: t.drugClassification || (hooks.classifyTrial ? hooks.classifyTrial(t) : null),
+        dosageForm,
+        dosageGroup: dosageFormGroup(dosageForm, config),
+        indication: t.indication || (t.source === 'CDT' ? t.briefTitle : (t.condition || t.briefTitle)) || '',
+        phase: t.phase || ''
+      };
+    });
 
     // Enterprise filter: CDT trials are all pharma companies; CT.gov needs filtering
     const trials = rawTrials.filter(t => t.source === 'CDT' || isEnterprise(t.sponsor));
@@ -170,13 +174,31 @@ function generateReport(snapshot, scenario, isFull) {
     const cdtSponsors = new Set(cdtTrials.map(t => t.sponsor).filter(Boolean));
     const allSponsors = new Set(trials.map(t => t.sponsor).filter(Boolean));
 
-    const partialApi = { potency_category: info.potency_category };
+    // 剂型分组统计 → 主剂型（优先 OSD 相关分组：口服固体/改良释放/颗粒散剂）
+    const groupCounts = {};
+    trials.forEach(t => { if (t.dosageGroup && t.dosageGroup !== 'unknown') groupCounts[t.dosageGroup] = (groupCounts[t.dosageGroup] || 0) + 1; });
+    const PRIORITY_GROUPS = ['osd', 'mr', 'granule'];
+    const primaryGroup = PRIORITY_GROUPS.find(g => groupCounts[g])
+      || (Object.entries(groupCounts).sort((a, b) => b[1] - a[1])[0] || ['unknown'])[0];
+
+    // 药物分类分布
+    const classificationCounts = {};
+    trials.forEach(t => { const c = t.drugClassification || '未分类'; classificationCounts[c] = (classificationCounts[c] || 0) + 1; });
+
+    // CSP 推荐：以剂型为主（返回 {text, confirm}）
+    const partialApi = { potency_category: info.potency_category, dosageGroup: primaryGroup };
+    const csp = hooks.recommendCSP ? hooks.recommendCSP(partialApi, config) : null;
+
     enrichedApis[apiName] = {
       name_en: apiName,
       name_cn: info.name_cn,
       potency_category: info.potency_category,
       ai_limit: info.ai_limit,
-      csp_recommendation: hooks.recommendCSP ? hooks.recommendCSP(partialApi, config) : (config.category.csp_by_category[info.potency_category] || null),
+      csp_recommendation: csp ? csp.text : (config.category.csp_by_category[info.potency_category] || null),
+      csp_confirm: csp ? csp.confirm : null,
+      dosageGroup: primaryGroup,
+      groupCounts,
+      classificationCounts,
       trials,
       cdtTrials,
       ctgovTrials,
@@ -216,11 +238,20 @@ function generateReport(snapshot, scenario, isFull) {
   });
 
   const ctx = {
-    snap: snapshot, config, totalLeads, totalNewLeads,
+    snap: snapshot, config, today, totalLeads, totalNewLeads,
     apisWithLeadsCount: apisWithLeads.length, newLeadApisCount: newLeadApis.length,
-    byCat, enrichedApis, allSponsorsGlobalSize: allSponsorsGlobal.size,
+    byCat, enrichedApis, newLeadApis, allSponsorsGlobalSize: allSponsorsGlobal.size,
     cdtCount, ctgovCount, cdtWithContact, ctgovWithContact, oralSolidCount
   };
+
+  return ctx;
+}
+
+// ── Markdown 渲染 ──
+function generateReport(snapshot, scenario, isFull) {
+  const { config, hooks } = scenario;
+  const ctx = buildLeadModel(snapshot, scenario, isFull);
+  const { totalLeads, totalNewLeads, apisWithLeadsCount, byCat, newLeadApis, today } = ctx;
 
   // ── Render Markdown ──
   let md = '';
@@ -262,7 +293,7 @@ function generateReport(snapshot, scenario, isFull) {
   // ── Write report ──
   const outputPath = path.join(WS, config.report_file);
   fs.writeFileSync(outputPath, md, 'utf8');
-  return { outputPath, totalLeads, totalNewLeads, apisWithLeadsCount: apisWithLeads.length };
+  return { outputPath, totalLeads, totalNewLeads, apisWithLeadsCount };
 }
 
 // ── Standalone (verification harness) ──
@@ -289,4 +320,4 @@ if (require.main === module) {
   console.log(`Stats: ${r.totalLeads} leads, ${r.totalNewLeads} new, ${r.apisWithLeadsCount} APIs with leads`);
 }
 
-module.exports = { generateReport };
+module.exports = { generateReport, buildLeadModel };

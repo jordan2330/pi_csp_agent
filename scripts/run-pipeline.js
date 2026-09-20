@@ -514,7 +514,7 @@ async function phase2b_cdt(allApis, isFull) {
 // ══════════════════════════════════════════════════
 // Phase 3: 快照 + 报告
 // ══════════════════════════════════════════════════
-function phase3_report(isFull) {
+async function phase3_report(isFull) {
   log('');
   log('═══ Phase 3: 生成快照和报告 ═══');
 
@@ -547,6 +547,16 @@ function phase3_report(isFull) {
   } catch (e) {
     log(`报告生成失败: ${e.message}`);
     if (e.stack) log(e.stack.substring(0, 500));
+  }
+
+  // ── Excel + CSV（主交付物：销售可直接筛选/透视）──
+  try {
+    const xlsxLib = require(path.join(__dirname, 'lib', 'report-xlsx.js'));
+    const r = await xlsxLib.generateWorkbook(snapshot, scenario, isFull);
+    log(`Excel 已生成: ${r.xlsxPath} （P1-口服固体 ${r.p1} 条 / P2-其他剂型 ${r.p2} 条）`);
+    log(`CSV 已生成: ${r.csvPath}`);
+  } catch (e) {
+    log(`Excel/CSV 生成失败: ${e.message}（如缺依赖请执行 npm i 安装 exceljs）`);
   }
 }
 
@@ -593,7 +603,7 @@ async function main() {
   const cdtStats = await phase2b_cdt(allApis, isFull);
 
   // ── Phase 3: 快照 + 报告 ──
-  phase3_report(isFull);
+  await phase3_report(isFull);
 
   // ── 全量模式自动切回增量 ──
   if (isFull) {

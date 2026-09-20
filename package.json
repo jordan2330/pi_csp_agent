@@ -1,0 +1,9 @@
+{
+  "name": "pi-csp-agent",
+  "version": "3.1.1",
+  "private": true,
+  "description": "CSP 商机发掘 pipeline（WSL 本地运行 + Windows 真实 Chrome 采集）",
+  "dependencies": {
+    "exceljs": "^4.4.0"
+  }
+}
