@@ -212,6 +212,12 @@ function buildLeadModel(snapshot, scenario, isFull) {
     };
   });
 
+  // ── 场景级分类一致性修正（可选 hook）：同一产品跨试验/跨企业统一口径 ──
+  if (hooks.refineClassifications) {
+    try { hooks.refineClassifications(Object.values(enrichedApis).flatMap(a => a.trials)); }
+    catch (e) { console.error('分类一致性修正失败:', e.message); }
+  }
+
   // ── Category grouping ──
   const byCat = {};
   config.category.order.forEach(c => { byCat[c] = []; });

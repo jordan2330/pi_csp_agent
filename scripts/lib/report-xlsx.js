@@ -27,8 +27,9 @@ const CAT_COLORS = { 1: 'FFF2CCCC', 2: 'FFFCE4D6', 3: 'FFFFF2CC', 4: 'FFE2EFDA',
 const HEADERS = [
   { key: 'priority', header: '优先级', width: 12 },
   { key: 'cat', header: '风险等级', width: 16 },
-  { key: 'apiCn', header: 'API(中文)', width: 16 },
-  { key: 'apiEn', header: 'API(英文)', width: 20 },
+  { key: 'apiCn', header: '主要API(中文)', width: 16 },
+  { key: 'apiEn', header: '主要API(英文)', width: 20 },
+  { key: 'relatedApis', header: '涉及API(含Cat)', width: 28 },
   { key: 'aiLimit', header: 'AI Limit', width: 12 },
   { key: 'sponsor', header: '申请人/企业', width: 30 },
   { key: 'drugName', header: '产品名称', width: 26 },
@@ -49,29 +50,31 @@ const HEADERS = [
   { key: 'isNew', header: '本次新增', width: 10 }
 ];
 
-// ── 把 model 变成"一行一条试验"的扁平记录 ──
+// ── 把 model 变成"一行 = 一条试验"的扁平记录 ──
+// 同一试验（source + 登记号）可能命中多个 API（如复方制剂同时命中两个 API），
+// 此处合并为一行，用「涉及API」列标注全部关联 API，风险等级取其中最高（Cat 最小）。
 // onlyNew=true（增量模式）：只保留本次新增的试验
 function flattenTrials(ctx, onlyNew = false) {
-  const rows = [];
+  const raw = [];
+  let seq = 0;
   Object.values(ctx.enrichedApis).forEach(api => {
     if (onlyNew && api.newTrialCount === 0) return;
     api.trials.forEach(t => {
       if (onlyNew && !t.isNew) return;
-      const isOsd = isOralSolid(t.dosageForm);
-      rows.push({
-        osd: isOsd,
-        priority: isOsd ? `P1-OSD-Cat${api.potency_category}` : `P2-其他-Cat${api.potency_category}`,
-        cat: `Cat ${api.potency_category}`,
-        catNum: api.potency_category,
+      seq++;
+      raw.push({
+        // 无登记号时用自增键，避免被误合并
+        key: t.regNo ? `${t.source}|${t.regNo}` : `__no_regno_${seq}`,
         apiCn: api.name_cn || api.name_en,
         apiEn: api.name_en,
+        catNum: api.potency_category,
         aiLimit: api.ai_limit,
-        sponsor: t.sponsor || '',
-        drugName: t.drugName || '',
-        dosageForm: t.dosageForm || '未识别',
-        drugClass: t.drugClassification || '未分类',
         csp: api.csp_recommendation || '',
         confirm: api.csp_confirm || '',
+        sponsor: t.sponsor || '',
+        drugName: t.drugName || '',
+        dosageForm: t.dosageForm || '',
+        drugClass: t.drugClassification || '未分类',
         status: t.status || '',
         indication: t.indication || t.briefTitle || '',
         phase: t.phase || '',
@@ -84,9 +87,47 @@ function flattenTrials(ctx, onlyNew = false) {
         source: t.source || '',
         isNew: t.isNew ? '🆕' : '',
         _sponsorCount: api.sponsorCount,
-        _trialCount: api.trialCount
+        _trialCount: api.trialCount,
+        _apis: [{ cn: api.name_cn || api.name_en, cat: api.potency_category }]
       });
     });
+  });
+
+  // ── 合并同一试验的重复行 ──
+  const merged = new Map();
+  for (const r of raw) {
+    const cur = merged.get(r.key);
+    if (!cur) { merged.set(r.key, r); continue; }
+    cur._apis.push(...r._apis);
+    cur._sponsorCount = Math.max(cur._sponsorCount, r._sponsorCount);
+    cur._trialCount = Math.max(cur._trialCount, r._trialCount);
+    if (r.drugName.length > cur.drugName.length) cur.drugName = r.drugName;
+    // 剂型取能识别到的那个（不同 API 的提取结果可能不同）
+    const curOk = cur.dosageForm && cur.dosageForm !== '未识别';
+    const rOk = r.dosageForm && r.dosageForm !== '未识别';
+    if (!curOk && rOk) cur.dosageForm = r.dosageForm;
+    // 取最高风险等级：同时采用该 API 的推荐方案
+    if (r.catNum < cur.catNum) {
+      Object.assign(cur, { catNum: r.catNum, apiCn: r.apiCn, apiEn: r.apiEn, aiLimit: r.aiLimit, csp: r.csp, confirm: r.confirm });
+    }
+  }
+
+  const rows = [...merged.values()].map(r => {
+    const isOsd = isOralSolid(r.dosageForm);
+    const seen = new Set();
+    const related = r._apis
+      .filter(a => { const k = a.cn; if (seen.has(k)) return false; seen.add(k); return true; })
+      .sort((a, b) => a.cat - b.cat || String(a.cn).localeCompare(String(b.cn)))
+      .map(a => `${a.cn}(Cat${a.cat})`)
+      .join(' / ');
+    return {
+      ...r,
+      osd: isOsd,
+      cat: `Cat ${r.catNum}`,
+      priority: isOsd ? `P1-OSD-Cat${r.catNum}` : `P2-其他-Cat${r.catNum}`,
+      relatedApis: related,
+      dosageForm: r.dosageForm || '未识别'
+    };
   });
 
   // 排序：OSD 优先 → Cat 升序 → 段内企业数降序 → 进行中优先 → 登记日期降序
@@ -143,7 +184,8 @@ function buildOverviewSheet(wb, ctx, rows, isFull) {
   title('总览');
   kv('FDA 亚硝胺风险 API', ctx.snap.fda_data.total_apis);
   kv('中国有临床试验的 API', ctx.apisWithLeadsCount);
-  kv('商机条目（试验数）', isFull ? ctx.totalLeads : rows.length);
+  kv('商机条目（去重后试验数）', rows.length);
+  kv('按 API 计条目（同一试验命中多个 API 会重复计）', isFull ? ctx.totalLeads : ctx.totalNewLeads);
   kv('本次新增', ctx.totalNewLeads);
   kv('涉及企业/机构', ctx.allSponsorsGlobalSize);
   kv('数据源', `CDT ${ctx.cdtCount} 条（含联系方式 ${ctx.cdtWithContact}）/ CT.gov ${ctx.ctgovCount} 条（含联系方式 ${ctx.ctgovWithContact}）`);
@@ -175,10 +217,11 @@ function buildOverviewSheet(wb, ctx, rows, isFull) {
   title('怎么用');
   [
     '1. 销售先看 P1-口服固体：Cat 1 排在最前（AI limit 最严 → 亚硝胺风险最高 → CSP 价值最大）',
-    '2. 需要 OSD+Cat1 单独视图：在 P1 sheet 用「风险等级」列筛选 = Cat 1 即可',
-    '3. 做透视表/图表：用「全部商机」sheet（一行 = 一条试验，字段扁平）',
-    '4. 管理视角（每 API 多少家企业/多少条试验）：看「按API汇总」',
-    '5. 推荐方案按剂型给出「候选组合」，并标注需向客户确认的信息（如泡罩线 vs 瓶装线）'
+    '2. 一行 = 一条试验（已去重）；同一试验涉及多个 API 时看「涉及API」列，风险等级取其中最高',
+    '3. 需要 OSD+Cat1 单独视图：在 P1 sheet 用「风险等级」列筛选 = Cat 1 即可',
+    '4. 做透视表/图表：用「全部商机」sheet（一行 = 一条试验，字段扁平）',
+    '5. 管理视角（每 API 多少家企业/多少条试验）：看「按API汇总」',
+    '6. 推荐方案按剂型给出「候选组合」，并标注需向客户确认的信息（如泡罩线 vs 瓶装线）'
   ].forEach(s => kv('', s));
   ws.addRow([]);
 

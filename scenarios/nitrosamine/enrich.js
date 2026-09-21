@@ -81,6 +81,58 @@ function cspPart(api) {
   return s;
 }
 
+// ── 产品名归一（去空格/全角空格/标点 + 小写），用于跨 API、跨企业的同名产品归并 ──
+function normalizeProductName(name) {
+  return String(name || '')
+    .replace(/[\s\u3000]+/g, '')
+    .replace(/[（）()\[\]【】"'“”·、；;,，]/g, '')
+    .toLowerCase();
+}
+
+// ── 分类一致性修正（批量，通用层在逐试验分类后调用）──
+// 背景：同一产品在不同试验里可能得到不同标签——例：同一企业的同品种，
+//       BE 试验判为"仿制药"，而 IV 期（上市后）试验被判为"新药"，销售看到同药两种口径。
+// 规则：① 同一产品名只要有一次 BE/一致性评价证据 → 该产品（非原研企业）统一为"仿制药"
+//       ② 非原研企业的 IV 期试验 → "仿制药"（已上市产品，多数为仿制/已获批）
+//       ③ 同一（企业, 产品）组内标签不一致时，按多数票 + 业务优先级统一
+function refineClassifications(trials) {
+  if (!trials || !trials.length) return;
+
+  // ① 收集"有 BE 证据"的产品名
+  const beProducts = new Set();
+  for (const t of trials) {
+    const beEvidence = t.drugClassification === '仿制药'
+      || /生物等效|一致性评价|生物利用度/.test(`${t.trialType || ''} ${t.briefTitle || ''}`);
+    if (beEvidence) beProducts.add(normalizeProductName(t.drugName));
+  }
+
+  // ①② 逐试验修正
+  for (const t of trials) {
+    if (originatorCompanies.has(t.sponsor || '')) continue;
+    const key = normalizeProductName(t.drugName);
+    const phase = String(t.phase || '');
+    const isPhase4 = /^(IV|4)期/.test(phase) || /PHASE\s?4/i.test(phase);
+    if (beProducts.has(key) || isPhase4) t.drugClassification = '仿制药';
+  }
+
+  // ③ （企业, 产品）组内统一
+  const PRIORITY = ['仿制药', '新药（改良型）', '新药', '原研药', '观察性研究', '未分类'];
+  const groups = new Map();
+  for (const t of trials) {
+    const g = `${t.sponsor || ''}|${normalizeProductName(t.drugName)}`;
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g).push(t);
+  }
+  for (const list of groups.values()) {
+    const counts = {};
+    list.forEach(t => { const c = t.drugClassification || '未分类'; counts[c] = (counts[c] || 0) + 1; });
+    if (Object.keys(counts).length <= 1) continue;
+    const winner = Object.keys(counts).sort((a, b) =>
+      counts[b] - counts[a] || PRIORITY.indexOf(a) - PRIORITY.indexOf(b))[0];
+    list.forEach(t => { t.drugClassification = winner; });
+  }
+}
+
 // ── New leads subtitle (the `> ...` line) ──
 function newLeadSubtitle(api, config) {
   const labels = config.category.labels;
@@ -165,6 +217,8 @@ function snapshotExtras(fda) {
 
 module.exports = {
   classifyTrial,
+  refineClassifications,
+  normalizeProductName,
   recommendCSP,
   newLeadSubtitle,
   fullLeadSubtitle,

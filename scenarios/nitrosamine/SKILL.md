@@ -217,6 +217,8 @@ tail -20 output/runs/pipeline.log
     | 按API汇总 | 一行 = 一个 API（试验数/企业数/OSD 数/推荐方案）|
   - `output/CSP_Leads_Report.md` — Markdown（pi 读取摘要 / 文本存档）
 - **优先度规则**：OSD+Cat1 → OSD+Cat2/3/4/5 → 其他剂型+Cat1/2/3/4/5（Sheet 顺序即优先级；组合视图用 Excel 自动筛选可秒出，不单独拆 sheet）
+- **去重口径**：Excel 中一行 = 一条试验（按 source+登记号 去重）；同一试验命中多个 API（如复方制剂）时用「涉及API(含Cat)」列标注，风险等级取其中最高
+- **分类口径（产品级一致）**：`enrich.js` 的 `refineClassifications` 按产品名统一——同一产品只要有一次 BE/一致性评价证据（非原研企业）即全部记为仿制药；非原研企业的上市后 IV 期试验同样记为仿制药
 - **CSP 推荐方案按剂型给出候选组合**（依据 CSP 产品选型准则：包装形态优先），并标注需销售向客户确认的信息（如泡罩线 vs 瓶装线）；风险等级只决定优先级
 - **增量模式两个交付物都只含新增商机**（Sheet 名前缀 `新增-`）；全量商机列表仅在 `search_mode: full` 时输出
 
