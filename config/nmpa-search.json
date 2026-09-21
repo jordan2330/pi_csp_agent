@@ -1,0 +1,9 @@
+{
+  "_comment": "NMPA 注册分类/一致性评价的搜索富化（博查 API）。证据抽取与门控规则见 scripts/lib/nmpa-search.js",
+  "enabled": true,
+  "max_queries_per_run": 100,
+  "cache_ttl_days": 90,
+  "delay_between_queries_ms": 1500,
+  "ai_search_escalation": false,
+  "only_unresolved": true
+}

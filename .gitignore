@@ -20,3 +20,6 @@ output/CSP_Leads_Report.xlsx
 
 # Excel 临时锁文件（打开工作簿时产生）
 ~$*
+
+# NMPA 搜索证据缓存（运行时生成）
+/config/nmpa_class_cache.json

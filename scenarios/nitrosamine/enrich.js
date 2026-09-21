@@ -15,16 +15,43 @@
  */
 
 // ── Known originator companies ──
-const originatorCompanies = new Set([
-  'Bayer', 'Novartis', 'Novartis Pharmaceuticals', 'Sanofi', 'AstraZeneca',
-  'Pfizer', 'Eli Lilly', 'Eli Lilly and Company', 'Merck', 'MSD',
-  'GlaxoSmithKline', 'Roche', 'AbbVie', 'Abbott', 'Johnson & Johnson',
-  'Bristol-Myers Squibb', 'Amgen', 'Boehringer Ingelheim', 'Takeda',
-  'Daiichi Sankyo', 'Otsuka', 'Eisai', 'Astellas', 'Gilead',
-  'Biogen', 'Regeneron', 'Genentech', 'Vertex'
-]);
+// 说明：CDT 的申办方字段常是多个主体的拼接（如 "Pfizer Inc./ 辉瑞（北京）研究开发有限公司/"），
+//       所以用**关键词包含匹配**（英文名 + 中文名）而不是集合精确匹配，否则跨国药企的中文实体会被漏判。
+const ORIGINATOR_KEYWORDS = [
+  // 英文
+  'Bayer', 'Novartis', 'Sanofi', 'AstraZeneca', 'Pfizer', 'Eli Lilly', 'Merck', 'MSD',
+  'GlaxoSmithKline', 'Roche', 'Genentech', 'AbbVie', 'Abbott', 'Johnson & Johnson', 'Janssen',
+  'Amgen', 'Boehringer', 'Takeda', 'Daiichi Sankyo', 'Otsuka', 'Eisai', 'Astellas', 'Gilead',
+  'Biogen', 'Regeneron', 'Vertex', ' Novo ', 'Bristol-Myers', 'Bristol Myers', 'Lundbeck',
+  'UCB', 'Servier', 'Teva', 'Sandoz', 'Mylan', 'Sun Pharma', 'Chiesi', 'Bracco', 'Meiji',
+  // 中文（跨国药企在华实体）
+  '辉瑞', '诺华', '阿斯利康', '赛诺菲', '默沙东', '默克', '礼来', '拜耳', '勃林格',
+  '葛兰素', '罗氏', '武田', '大冢', '卫材', '诺和诺德', '诺和', '强生', '杨森',
+  '艾伯维', '安进', '吉利德', '第一三共', '参天', '灵北', '优时比', '施维雅',
+  '贝朗', '费森尤斯', '梯瓦', '山德士', '中外制药', '大鹏药品', '协和麒麟'
+];
+
+// 是否为原研企业（申办方字符串包含任一关键词）
+function isOriginatorCompany(sponsor) {
+  const s = String(sponsor || '');
+  if (!s) return false;
+  return ORIGINATOR_KEYWORDS.some(k => s.includes(k));
+}
 
 // ── Drug classification inference ──
+// ── 中文期次解析 ──
+// CDT 的 phase 写法多样："I期" / "其他说明:Ib/II" / "其他说明:Ib/IIa" / "其他说明:药代动力学比较试验"（非期次）
+// 返回 { late }（late=II/III/IV 期）或 null（无法解析为期次）
+function parseCnPhase(phase) {
+  const s = String(phase || '');
+  const m = s.match(/其他说明[:：]\s*([^\s]+)/);
+  const token = (m ? m[1] : s).trim();
+  const pm = token.match(/^(I{1,3}[abAB]?|IV)(?:\s*\/\s*(I{1,3}[abAB]?|IV))?期?$/);
+  if (!pm) return null;
+  const late = /^(II|III|IV)/.test(pm[1]) || /^(II|III|IV)/.test(pm[2] || '');
+  return { late };
+}
+
 // ── Drug classification inference（规则基于真实 phase/trialType 取值）──
 //   CDT: phase="其它 其他说明:生物等效性试验" | "I期/II期/III期"（trialType 含 生物等效/药代动力学/安全性和有效性）
 //   CT.gov: phase="PHASE1/2/3/4" | "NA" | ""（trialType: INTERVENTIONAL / OBSERVATIONAL）
@@ -34,7 +61,7 @@ function classifyTrial(trial) {
   const sponsor = trial.sponsor || '';
   const drugName = trial.drugName || '';
   const title = `${trial.briefTitle || ''} ${trial.officialTitle || ''}`;
-  const isOriginator = originatorCompanies.has(sponsor);
+  const isOriginator = isOriginatorCompany(sponsor);
 
   // ── 仿制药：BE / 生物利用度 / 一致性评价 ──
   if (/生物等效|生物利用度|一致性评价|\bBE\b/i.test(trialType)) return '仿制药';
@@ -47,8 +74,9 @@ function classifyTrial(trial) {
   // ── 改良型新药：剂型/复方改良特征 ──
   if (/缓释|控释|肠溶|迟释|缓控释|复方|口崩|分散片|咀嚼|双层|速释/.test(drugName)) return '新药（改良型）';
 
-  const isLatePhase = /PHASE\s?(2|3|4)/.test(phase.toUpperCase()) || /^(II|III|IV)期/.test(phase);
-  const isAnyPhase = /PHASE\s?(1|2|3|4)/.test(phase.toUpperCase()) || /^(I|II|III|IV)期/.test(phase);
+  const cn = parseCnPhase(phase);
+  const isLatePhase = /PHASE\s?(2|3|4)/.test(phase.toUpperCase()) || !!(cn && cn.late);
+  const isAnyPhase = /PHASE\s?(1|2|3|4)/.test(phase.toUpperCase()) || !!cn;
 
   // ── 原研药：原研企业 + 中后期临床 ──
   if (isOriginator && isLatePhase) return '原研药';
@@ -108,7 +136,7 @@ function refineClassifications(trials) {
 
   // ①② 逐试验修正
   for (const t of trials) {
-    if (originatorCompanies.has(t.sponsor || '')) continue;
+    if (isOriginatorCompany(t.sponsor)) continue;
     const key = normalizeProductName(t.drugName);
     const phase = String(t.phase || '');
     const isPhase4 = /^(IV|4)期/.test(phase) || /PHASE\s?4/i.test(phase);
@@ -130,6 +158,26 @@ function refineClassifications(trials) {
     const winner = Object.keys(counts).sort((a, b) =>
       counts[b] - counts[a] || PRIORITY.indexOf(a) - PRIORITY.indexOf(b))[0];
     list.forEach(t => { t.drugClassification = winner; });
+  }
+
+  // ④ 搜索证据优先（NMPA 注册分类 / 一致性评价 → 权威度高于规则推断）
+  //    t.nmpa 由 scripts/lib/report.js 从 Phase 2c 缓存挂载
+  //    注意粒度：证据是"品种级"（某品种有仿制过评产品），不等于该试验就是仿制 → 需要排除
+  //    代码号新药/改良型（如 TQC3927、JKN2304 这类企业自研吸入制剂）
+  const CODE_NAME = /^[A-Za-z][A-Za-z0-9\-]{2,}$|[A-Za-z]{2,}[- ]?\d{2,}/;
+  const IMPROVED_NAME = /缓释|控释|肠溶|迟释|缓控释|复方|口崩|分散片|咀嚼|双层|速释/;
+  for (const t of trials) {
+    const n = t.nmpa;
+    if (!n) continue;
+    if (isOriginatorCompany(t.sponsor)) continue;        // 原研企业仍按原研口径
+    const name = String(t.drugName || '').trim();
+    if (CODE_NAME.test(name)) {                          // 代码号 = 在研新药，不套用仿制证据
+      t.drugClassification = IMPROVED_NAME.test(name) ? '新药（改良型）' : '新药';
+      continue;
+    }
+    if (IMPROVED_NAME.test(name)) { t.drugClassification = '新药（改良型）'; continue; }
+    if (n.generic) t.drugClassification = '仿制药';
+    else if (n.innovative) t.drugClassification = '新药';
   }
 }
 
@@ -219,6 +267,7 @@ module.exports = {
   classifyTrial,
   refineClassifications,
   normalizeProductName,
+  isOriginatorCompany,
   recommendCSP,
   newLeadSubtitle,
   fullLeadSubtitle,

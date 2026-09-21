@@ -117,6 +117,10 @@ function buildLeadModel(snapshot, scenario, isFull) {
   }
   const results = snapshot.trials_data.results;
 
+  // 法规分类证据缓存（Phase 2c 产出；缺失/未启用时静默降级为规则推断）
+  let nm = null, nmpaCache = { products: {} };
+  try { nm = require('./nmpa-search'); nmpaCache = nm.loadCache(); } catch (_) {}
+
   // ── Build apiInfo ──
   const apiInfo = {};
   Object.entries(fdaCache.apis).forEach(([name, info]) => {
@@ -150,9 +154,33 @@ function buildLeadModel(snapshot, scenario, isFull) {
   apisWithLeads.forEach(apiName => {
     const rawTrials = (filteredResults[apiName] || []).map(t => {
       const dosageForm = resolveDosageForm(t);
+      const nmpa = (() => {
+        if (!nm) return null;
+        const api = apiInfo[apiName] || {};
+        const drugCore = nm.coreName(t.drugName);
+        const cnCore = api.name_cn ? nm.coreName(api.name_cn) : '';
+        const drugRaw = String(t.drugName || '');
+        // 归属判定：试验药物必须"就是"该 API 品种（否则只是把该 API 当背景，如亚叶酸钙出现在双抗化疗方案里）
+        const belongs = (cnCore && drugCore === cnCore)
+          || (apiName && drugRaw.toLowerCase().includes(String(apiName).toLowerCase()))
+          || (api.name_cn && drugRaw.includes(api.name_cn));
+        // ① 产品级证据（试验品种精确命中）优先；② API 级证据仅在归属成立时使用
+        let entry = nmpaCache.products[drugCore] || null;
+        if (!entry && belongs && cnCore) entry = nmpaCache.products[cnCore] || null;
+        if (!entry || entry.confidence === 'none') return null;
+        const f = nm.classifyFacts(entry);
+        return {
+          regClass: f.regClass || '', iec: f.iecPassed ? '通过/视同通过' : '',
+          generic: f.generic, innovative: f.innovative, improved: f.improved,
+          confidence: entry.confidence,
+          url: (entry.sources || [])[0] || '',
+          evidence: ((entry.evidence || [])[0] || {}).text || ''
+        };
+      })();
       return {
         ...t,
         drugClassification: t.drugClassification || (hooks.classifyTrial ? hooks.classifyTrial(t) : null),
+        nmpa,
         dosageForm,
         dosageGroup: dosageFormGroup(dosageForm, config),
         indication: t.indication || (t.source === 'CDT' ? t.briefTitle : (t.condition || t.briefTitle)) || '',

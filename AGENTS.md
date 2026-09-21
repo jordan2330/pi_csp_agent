@@ -33,6 +33,7 @@ This is a Pi Coding Agent project for CSP (Aptar active packaging) sales lead di
   - `lib/snapshot.js` — 快照管理 + 增量检测
   - `lib/report.js` — 通用 Markdown 报告渲染器（由 scenario.json + enrich.js 驱动）
   - `lib/report-xlsx.js` — 通用 Excel 渲染器（5 sheet：概览 / P1-口服固体 / P2-其他剂型 / 全部商机 / 按API汇总）
+  - `lib/nmpa-search.js` — 法规分类富化：博查搜索抽取 NMPA 注册分类/一致性评价证据（品种名门控 + 归属判定 + 缓存/预算）
 - `prompts/` — Pi prompt templates (entry points like `/lead-scan`)
 - `config/` — Cached data and model configuration
   - `models.json` — LLM 模型配置
@@ -55,6 +56,8 @@ This is a Pi Coding Agent project for CSP (Aptar active packaging) sales lead di
 - FDA data is auto-refreshed each run (page updated quarterly by FDA)
 - 本地运行（WSL Ubuntu 22），不使用容器；仓库根目录即工作目录，脚本路径一律用 `__dirname` 推导或相对路径，禁止硬编码绝对路径
 - 浏览器采集依赖 Windows 侧真实 Chrome：由 `scripts/launch-chrome.sh` 启动专用 profile（CDP 端口 9223），WSL 需 mirrored 网络模式（`.wslconfig`: `networkingMode=mirrored`）；`BROWSER_ENDPOINT` 可覆盖默认端点
+- 法规分类富化（Phase 2c）需 `BOCHA_API_KEY`（或 `~/.pi/web-search.json` 的 bochaApiKey）；预算与开关见 `config/nmpa-search.json`
+- 药物分类优先级：**搜索证据（NMPA 注册分类/一致性评价）> 规则推断 > 组内统一**；证据缺失时不改判
 - CDT 已启用瑞数动态安全（Riverdance：JS 质询 + 浏览器指纹检测），必须使用真实浏览器采集；headless/自动化浏览器会被拦截，且不得注入伪造指纹（伪造值本身是可识别特征）
 
 ## Pipeline Integrity (CRITICAL)

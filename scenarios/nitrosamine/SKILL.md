@@ -202,6 +202,15 @@ tail -20 output/runs/pipeline.log
 - 全量（首次/重扫）约 3-4 小时；增量模式无新增时每 API 仅翻 1-2 页，通常几十分钟完成
 - 如确需提速可临时把 `CDT_WORKER_COUNT` 调到 2（代价：并发行为更容易被风控识别）
 
+#### Phase 2c: 法规分类富化（NMPA 注册分类 / 一致性评价，见 `scripts/lib/nmpa-search.js`）
+- 目的：临床试验登记数据里**没有**注册分类（1类创新/2类改良/3-4类仿制）与一致性评价状态，用博查搜索抽取证据补上
+- 两级查询：Web Search（便宜，默认）→ AI Search 兜底（`config/nmpa-search.json → ai_search_escalation`，实测收益低，可关）
+- **品种名门控**：结果标题/摘要必须含品种核心名（去盐基/剂型后缀），否则会拿到近似品种的证据（查"富马酸贝达喹啉片"会返回"富马酸卢帕他定片"）
+- **归属判定**：API 级证据只在"试验药物就是该品种"时套用（否则亚叶酸钙出现在双抗化疗方案里会被误判为仿制）
+- 证据缺失时不改判（回落规则推断），只补信息
+- 缓存 `config/nmpa_class_cache.json`（含 `rules_version`，规则升级即失效重查）；单次预算 `max_queries_per_run`（默认 100 次），超出跳过并记 errors.log
+- 输出三列进 Excel：**注册分类 / 一致性评价 / 证据来源**；概览有"法规分类证据"统计段
+
 #### Phase 3: 快照 + 报告
 - **增量检测：对比前次快照标记 isNew；同日二次运行对比当天已有快照，避免重复汇报新增**
 - 从 `config/fda_nitrosamines.json` 生成快照到 `output/runs/YYYY-MM-DD.json`
@@ -218,6 +227,7 @@ tail -20 output/runs/pipeline.log
   - `output/CSP_Leads_Report.md` — Markdown（pi 读取摘要 / 文本存档）
 - **优先度规则**：OSD+Cat1 → OSD+Cat2/3/4/5 → 其他剂型+Cat1/2/3/4/5（Sheet 顺序即优先级；组合视图用 Excel 自动筛选可秒出，不单独拆 sheet）
 - **去重口径**：Excel 中一行 = 一条试验（按 source+登记号 去重）；同一试验命中多个 API（如复方制剂）时用「涉及API(含Cat)」列标注，风险等级取其中最高
+- **分类优先级**：**搜索证据（NMPA）> 规则推断 > 组内统一**；代码号在研新药（如 TQC3927）不被品种级仿制证据覆盖
 - **分类口径（产品级一致）**：`enrich.js` 的 `refineClassifications` 按产品名统一——同一产品只要有一次 BE/一致性评价证据（非原研企业）即全部记为仿制药；非原研企业的上市后 IV 期试验同样记为仿制药
 - **CSP 推荐方案按剂型给出候选组合**（依据 CSP 产品选型准则：包装形态优先），并标注需销售向客户确认的信息（如泡罩线 vs 瓶装线）；风险等级只决定优先级
 - **增量模式两个交付物都只含新增商机**（Sheet 名前缀 `新增-`）；全量商机列表仅在 `search_mode: full` 时输出

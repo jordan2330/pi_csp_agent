@@ -35,6 +35,9 @@ const HEADERS = [
   { key: 'drugName', header: '产品名称', width: 26 },
   { key: 'dosageForm', header: '剂型', width: 20 },
   { key: 'drugClass', header: '药物分类', width: 14 },
+  { key: 'regClass', header: '注册分类', width: 10 },
+  { key: 'iec', header: '一致性评价', width: 13 },
+  { key: 'nmpaSrc', header: '证据来源', width: 20 },
   { key: 'csp', header: '推荐CSP方案', width: 34 },
   { key: 'confirm', header: '待确认', width: 18 },
   { key: 'status', header: '试验状态', width: 16 },
@@ -75,6 +78,9 @@ function flattenTrials(ctx, onlyNew = false) {
         drugName: t.drugName || '',
         dosageForm: t.dosageForm || '',
         drugClass: t.drugClassification || '未分类',
+        regClass: (t.nmpa && t.nmpa.regClass) || '',
+        iec: (t.nmpa && t.nmpa.iec) || '',
+        nmpaSrc: (() => { try { return t.nmpa && t.nmpa.url ? new URL(t.nmpa.url).hostname.replace(/^www\./, '') : ''; } catch (_) { return ''; } })(),
         status: t.status || '',
         indication: t.indication || t.briefTitle || '',
         phase: t.phase || '',
@@ -102,6 +108,9 @@ function flattenTrials(ctx, onlyNew = false) {
     cur._sponsorCount = Math.max(cur._sponsorCount, r._sponsorCount);
     cur._trialCount = Math.max(cur._trialCount, r._trialCount);
     if (r.drugName.length > cur.drugName.length) cur.drugName = r.drugName;
+    if (!cur.regClass && r.regClass) cur.regClass = r.regClass;
+    if (!cur.iec && r.iec) cur.iec = r.iec;
+    if (!cur.nmpaSrc && r.nmpaSrc) cur.nmpaSrc = r.nmpaSrc;
     // 剂型取能识别到的那个（不同 API 的提取结果可能不同）
     const curOk = cur.dosageForm && cur.dosageForm !== '未识别';
     const rOk = r.dosageForm && r.dosageForm !== '未识别';
@@ -213,6 +222,23 @@ function buildOverviewSheet(wb, ctx, rows, isFull) {
   rows.forEach(r => { classCount[r.drugClass] = (classCount[r.drugClass] || 0) + 1; });
   Object.entries(classCount).sort((a, b) => b[1] - a[1]).forEach(([c, n]) => kv(c, `${n} 条 (${fmtPct(n, rows.length)})`));
   ws.addRow([]);
+
+  // 法规分类证据（Phase 2c 搜索富化）
+  try {
+    const nm = require('./nmpa-search');
+    const cache = nm.loadCache();
+    const entries = Object.values(cache.products || {}).filter(e => e.confidence !== 'none');
+    const withIec = entries.filter(e => nm.classifyFacts(e).iecPassed).length;
+    const withReg = entries.filter(e => nm.classifyFacts(e).regClass).length;
+    const calls = Object.values(cache.products || {}).reduce((a, e) => a + (e.queries || 0), 0);
+    title('法规分类证据（NMPA 搜索富化）');
+    kv('已查品种', Object.keys(cache.products || {}).length + ' 个（累计查询 ' + calls + ' 次）');
+    kv('取得证据的品种', entries.length + ' 个');
+    kv('  其中含"注册分类"', withReg + ' 个（1类创新/2类改良/3-4类仿制）');
+    kv('  其中含"一致性评价"', withIec + ' 个（过评 = 已上市仿制、有真实产能）');
+    kv('说明', '空白的注册分类/一致性评价列 = 该品种未取得搜索证据（不等于没有），分类回落规则推断');
+    ws.addRow([]);
+  } catch (_) { /* 未启用搜索富化 */ }
 
   title('怎么用');
   [

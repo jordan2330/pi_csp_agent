@@ -73,6 +73,7 @@ cutoff.setFullYear(cutoff.getFullYear() - LOOKBACK_YEARS);
 
 const FDA_FILE = path.join(WS, scenarioConfig.cache_file);
 const sources = require(path.join(__dirname, 'lib/sources.js'));
+const nmpaSearch = require(path.join(__dirname, 'lib', 'nmpa-search.js'));
 const snapshotLib = require(path.join(__dirname, 'lib/snapshot.js'));
 const reportLib = require(path.join(__dirname, 'lib/report.js'));
 
@@ -514,6 +515,38 @@ async function phase2b_cdt(allApis, isFull) {
 // ══════════════════════════════════════════════════
 // Phase 3: 快照 + 报告
 // ══════════════════════════════════════════════════
+// Phase 2c: 法规分类富化（博查搜索抽取 NMPA 注册分类 / 一致性评价证据）
+// ══════════════════════════════════════════════════
+async function phase2c_nmpaEnrich() {
+  log('');
+  log('═══ Phase 2c: 法规分类富化（NMPA 注册分类/一致性评价）═══');
+
+  const cfg = nmpaSearch.loadConfig();
+  if (!cfg.enabled) { log('已禁用（config/nmpa-search.json → enabled=false）'); return { queried: 0, hits: 0, total: 0, skippedBudget: 0 }; }
+  if (!nmpaSearch.getApiKey()) { log('跳过：未配置博查 API Key（BOCHA_API_KEY 或 ~/.pi/web-search.json）'); return { queried: 0, hits: 0, total: 0, skippedBudget: 0 }; }
+
+  // 待富化品种 = API 中文名 + 中文产品核心名（只取像"真药名"的）
+  const names = new Set();
+  Object.values(fda.apis).forEach(api => {
+    if (api.name_cn && nmpaSearch.isQueryableProduct(api.name_cn)) names.add(api.name_cn);
+    (api.results || []).forEach(t => { if (nmpaSearch.isQueryableProduct(t.drugName)) names.add(nmpaSearch.coreName(t.drugName)); });
+  });
+  log(`待富化品种: ${names.size} 个 | 查询预算: ${cfg.max_queries_per_run} 次 | 缓存 TTL: ${cfg.cache_ttl_days} 天`);
+
+  const beforeCache = nmpaSearch.loadCache();
+  const beforeCount = Object.keys(beforeCache.products || {}).length;
+  const res = await nmpaSearch.enrichProducts([...names], {
+    onProgress: (core, e) => { if (e && e.confidence !== 'none') log(`  [NMPA] ${core}: ✅ ${Object.keys(e.facts || {}).slice(0, 3).join(',')}`); }
+  });
+  const hitRate = res.total ? (res.hits / res.total * 100).toFixed(0) : 0;
+  log(`完成: 新查询 ${res.queried} 次 | 命中 ${res.hits}/${res.total} (${hitRate}%) | 缓存内已有 ${beforeCount} 个品种`);
+  if (res.skippedBudget > 0) {
+    log(`⚠️ 因超出预算跳过 ${res.skippedBudget} 个品种（下次运行继续；可调 config/nmpa-search.json → max_queries_per_run）`);
+    fs.appendFileSync(ERR_LOG, `[${new Date().toISOString()}] [NMPA-BUDGET] 超出预算跳过 ${res.skippedBudget} 个品种\n`);
+  }
+  return res;
+}
+
 async function phase3_report(isFull) {
   log('');
   log('═══ Phase 3: 生成快照和报告 ═══');
@@ -602,6 +635,9 @@ async function main() {
   const cdtStats = await phase2b_cdt(allApis, isFull);
 
   // ── Phase 3: 快照 + 报告 ──
+  // Phase 2c: 法规分类富化（可选：未配置博查 Key 或 enabled=false 时自动跳过）
+  await phase2c_nmpaEnrich();
+
   await phase3_report(isFull);
 
   // ── 全量模式自动切回增量 ──
