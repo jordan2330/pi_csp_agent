@@ -195,7 +195,13 @@ tail -20 output/runs/pipeline.log
 - **单 worker**（`run-pipeline.js` 中 `CDT_WORKER_COUNT = 1`）：CDT 已启用瑞数反爬，低频单线程行为更像真人
 - 每个 API 创建独立 context+page，用完关闭；页面级断连自动重建 session 重试
 - 调用 `scripts/lib/sources.cdtSearchOneAPI()` → `skills/browser_executor/scripts/cdt-search-lib.js`
-- 用中文名搜索，提取：产品名称（drugName）、剂型（中文后缀识别）、试验分期、企业联系方式
+- **检索方式：药物名称精确匹配（二级查询）**——`?drugs_name=<API中文名>&drugs_type=2`
+  - ⚠️ 不可用旧的 `?keywords=`（全文关键词检索）：正文里提到某 API 就会被命中，
+    例如搜"他莫昔芬"会返回"阿贝西利片/依西美坦片"（正文只写了"联合内分泌治疗（他莫昔芬或芳香化酶抑制剂）"），产生大量错误数据
+  - 实测：他莫昔芬 21 条(误报为主) → **2 条**(均为枸橼酸他莫昔芬片)；二甲双胍 825 → 577 条
+  - 结果仍按登记号降序 → 增量游标与年份早停逻辑不受影响
+  - 调试可用 `CDT_SEARCH_MODE=keyword` 回到旧行为对比
+- 提取：产品名称（drugName）、剂型（中文后缀识别）、试验分期、企业联系方式
 - 每 API 参数：`maxPages: 5, batchSize: 50`
 - 时间窗过滤：登记号年份 >= 窗口起始年（`lookback_years`）；结果按登记号降序，**整页登记号都早于窗口年份即早停翻页**（省请求、降风控暴露）
 - API 间延迟: 5-8s（配置在 `config/cdt-throttle.json`）

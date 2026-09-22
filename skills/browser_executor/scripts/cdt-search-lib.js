@@ -287,7 +287,20 @@ async function searchOneAPI(browser, apiName, opts = {}) {
     // ══════════════════════════════════════
     await newSession(); // 首次创建 session
 
-    const searchUrl = `https://www.chinadrugtrials.org.cn/clinicaltrials.searchlist.dhtml?keywords=${encodeURIComponent(apiName)}`;
+    // ── 检索方式：药物名称精确匹配（二级查询）──
+    // 背景：旧的 `?keywords=` 是全文关键词检索——正文里提到某 API 就会命中，
+    // 例如搜"他莫昔芬"会返回"阿贝西利片/依西美坦片"（正文仅提到"联合内分泌治疗（他莫昔芬或芳香化酶抑制剂）"），
+    // 造成大量错误数据。二级查询的 `drugs_name` 按药物名称过滤，结果准确。
+    // 实测：他莫昔芬 21 条(含大量误报) → 2 条(均为枸橼酸他莫昔芬片)；二甲双胍 825 → 577 条
+    // 排序仍为登记号降序 → 增量游标与年份早停逻辑不受影响。
+    // 调试用：CDT_SEARCH_MODE=keyword 可回到旧的全文检索
+    const useKeyword = /^keyword$/i.test(process.env.CDT_SEARCH_MODE || '');
+    const searchParams = new URLSearchParams({
+      reg_no: '', indication: '', case_no: '',
+      ...(useKeyword ? { keywords: apiName } : { drugs_name: apiName, drugs_type: '2' }),
+      appliers: '', communities: '', researchers: '', agencies: '', state: ''
+    });
+    const searchUrl = `https://www.chinadrugtrials.org.cn/clinicaltrials.searchlist.dhtml?${searchParams.toString()}`;
 
     let searchData;
     try {
@@ -309,7 +322,7 @@ async function searchOneAPI(browser, apiName, opts = {}) {
       }
     }
 
-    console.error(`${logPrefix} 搜索: ${apiName}${cursor ? ` (增量, cursor=${cursor})` : ''} → ${searchData.pagination.totalRecords} 条, ${searchData.pagination.totalPages} 页`);
+    console.error(`${logPrefix} 搜索(${useKeyword ? '关键词' : '药物名称'}): ${apiName}${cursor ? ` (增量, cursor=${cursor})` : ''} → ${searchData.pagination.totalRecords} 条, ${searchData.pagination.totalPages} 页`);
 
     let allResults = [...searchData.results];
     let globalMaxRegNo = getMaxRegNo(searchData.results);

@@ -58,6 +58,7 @@ This is a Pi Coding Agent project for CSP (Aptar active packaging) sales lead di
 - 浏览器采集依赖 Windows 侧真实 Chrome：由 `scripts/launch-chrome.sh` 启动专用 profile（CDP 端口 9223），WSL 需 mirrored 网络模式（`.wslconfig`: `networkingMode=mirrored`）；`BROWSER_ENDPOINT` 可覆盖默认端点
 - 法规分类富化（Phase 2c）需 `BOCHA_API_KEY`（或 `~/.pi/web-search.json` 的 bochaApiKey）；预算与开关见 `config/nmpa-search.json`
 - 药物分类优先级：**搜索证据（NMPA 注册分类/一致性评价）> 规则推断 > 组内统一**；证据缺失时不改判
+- CDT 检索必须用**药物名称精确匹配**（`drugs_name` + `drugs_type=2`，二级查询）；禁止用 `keywords` 全文检索——它会把"正文提及"当成"有效成分"（搜他莫昔芬返回阿贝西利片/依西美坦片）
 - CDT 已启用瑞数动态安全（Riverdance：JS 质询 + 浏览器指纹检测），必须使用真实浏览器采集；headless/自动化浏览器会被拦截，且不得注入伪造指纹（伪造值本身是可识别特征）
 
 ## Pipeline Integrity (CRITICAL)
