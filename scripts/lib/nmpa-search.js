@@ -304,6 +304,16 @@ async function enrichProducts(productNames, opts = {}) {
   return { cache, queried, skippedBudget, hits, total: cores.length };
 }
 
+// ── 收集待富化品种（API 中文名 + 中文产品核心名）──
+function collectTargets(apis) {
+  const names = new Set();
+  Object.values(apis || {}).forEach(api => {
+    if (api.name_cn && isQueryableProduct(api.name_cn)) names.add(api.name_cn);
+    (api.results || []).forEach(t => { if (isQueryableProduct(t.drugName)) names.add(coreName(t.drugName)); });
+  });
+  return [...names];
+}
+
 // ── 判定（供分类使用）：从 facts 推导可用的分类信号 ──
 function classifyFacts(entry) {
   const f = (entry && entry.facts) || {};
@@ -326,10 +336,21 @@ function isQueryableProduct(name) {
   return /^[\u4e00-\u9fff]{2,}$/.test(core);
 }
 
+module.exports = { coreName, collectTargets, extractFacts, classifyFacts, enrichProduct, enrichProducts, loadCache, saveCache, loadConfig, getApiKey, isQueryableProduct, aiAssertions, cleanAiAnswer, CACHE_FILE };
+
 // ── CLI ──
 if (require.main === module) {
   const args = process.argv.slice(2);
   const getArg = (k) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : null; };
+
+const seed = Number(getArg('--sample') || 20);
+const allApi = args.includes('--all-api');
+const noAi = args.includes('--no-ai');
+const force = args.includes('--force');
+const topN = Number(getArg('--top') || 0);
+const allTargets = args.includes('--all-targets');
+const budgetOverride = Number(getArg('--budget') || 0) || undefined;
+
 
   (async () => {
     if (!getApiKey()) { console.error('❌ 缺少博查 API Key（BOCHA_API_KEY 或 ~/.pi/web-search.json）'); process.exit(1); }
@@ -340,6 +361,24 @@ if (require.main === module) {
       const byConf = {};
       list.forEach(p => { byConf[p.confidence] = (byConf[p.confidence] || 0) + 1; });
       console.log(`缓存品种: ${list.length} | 置信度: ${JSON.stringify(byConf)} | 更新于 ${c.updated_at}`);
+      return;
+    }
+
+    if (allTargets) {
+      const fdaCacheForTargets = JSON.parse(fs.readFileSync(path.join(WS, 'config', 'fda_nitrosamines.json'), 'utf8'));
+      const targets = collectTargets(fdaCacheForTargets.apis);
+      const cached = loadCache().products || {};
+      const todo = targets.filter(t => !isFresh(cached[coreName(t)], loadConfig().cache_ttl_days));
+      console.log(`目标品种 ${targets.length} 个 | 需查询 ${todo.length} 个 | 预算 ${budgetOverride || loadConfig().max_queries_per_run} 次\n`);
+      const res = await enrichProducts(targets, {
+        budget: budgetOverride,
+        onProgress: (core, e) => {
+          if (e && e.confidence !== 'none') console.log(`  ✅ ${core}: ${Object.keys(e.facts || {}).slice(0, 3).join(',')}`);
+        }
+      });
+      const c2 = loadCache().products || {};
+      const withEv = Object.values(c2).filter(e => e.confidence !== 'none').length;
+      console.log(`\n完成: 新查询 ${res.queried} 次 | 已查品种 ${Object.keys(c2).length} | 有证据 ${withEv} | 超预算跳过 ${res.skippedBudget}`);
       return;
     }
 
@@ -376,6 +415,8 @@ if (require.main === module) {
       if (e.samples.length < 1) e.samples.push(`${t.sponsor || ''}|${t.drugName}|${t.phase || ''}`);
     }));
 
+    // ── 一次性富化全部目标品种（Phase 2c 同款目标集）──
+
     // ── 抽检目标池 ──
     // ① API 中文名（NMPA 数据按中文通用名索引，是权威查询键）
     // ② 中文产品名（复方/成盐品种补充，且必须像“真药名”——过滤英文干预名/试验标签）
@@ -383,11 +424,6 @@ if (require.main === module) {
     const apiNames = [...new Set(Object.values(fdaCache.apis).map(a => a.name_cn).filter(isQueryableProduct))].sort();
     const productCores = [...new Set(Object.values(ctx.enrichedApis).flatMap(a => a.trials.map(t => t.drugName)).filter(isQueryableProduct).map(coreName))];
 
-    const seed = Number(getArg('--sample') || 20);
-    const allApi = args.includes('--all-api');
-    const noAi = args.includes('--no-ai');
-    const force = args.includes('--force');
-    const topN = Number(getArg('--top') || 0);
     let picked;
 
     // 价值导向抽样：按商机条数 Top-N 的 API（报告里最要紧的那批）
@@ -448,5 +484,3 @@ if (require.main === module) {
     console.log(`\n完成：高置信 ${stat.high} / 中置信 ${stat.medium} / 无证据 ${stat.none}（缓存: ${CACHE_FILE}）`);
   })().catch(e => { console.error('FATAL:', e.message); process.exit(1); });
 }
-
-module.exports = { coreName, extractFacts, classifyFacts, enrichProduct, enrichProducts, loadCache, saveCache, loadConfig, getApiKey, isQueryableProduct, aiAssertions, cleanAiAnswer, CACHE_FILE };

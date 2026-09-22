@@ -525,17 +525,13 @@ async function phase2c_nmpaEnrich() {
   if (!cfg.enabled) { log('已禁用（config/nmpa-search.json → enabled=false）'); return { queried: 0, hits: 0, total: 0, skippedBudget: 0 }; }
   if (!nmpaSearch.getApiKey()) { log('跳过：未配置博查 API Key（BOCHA_API_KEY 或 ~/.pi/web-search.json）'); return { queried: 0, hits: 0, total: 0, skippedBudget: 0 }; }
 
-  // 待富化品种 = API 中文名 + 中文产品核心名（只取像"真药名"的）
-  const names = new Set();
-  Object.values(fda.apis).forEach(api => {
-    if (api.name_cn && nmpaSearch.isQueryableProduct(api.name_cn)) names.add(api.name_cn);
-    (api.results || []).forEach(t => { if (nmpaSearch.isQueryableProduct(t.drugName)) names.add(nmpaSearch.coreName(t.drugName)); });
-  });
-  log(`待富化品种: ${names.size} 个 | 查询预算: ${cfg.max_queries_per_run} 次 | 缓存 TTL: ${cfg.cache_ttl_days} 天`);
+  // 待富化品种 = API 中文名 + 中文产品核心名（与 CLI --all-targets 共用同一函数）
+  const targets = nmpaSearch.collectTargets(fda.apis);
+  log(`待富化品种: ${targets.length} 个 | 查询预算: ${cfg.max_queries_per_run} 次 | 缓存 TTL: ${cfg.cache_ttl_days} 天`);
 
   const beforeCache = nmpaSearch.loadCache();
   const beforeCount = Object.keys(beforeCache.products || {}).length;
-  const res = await nmpaSearch.enrichProducts([...names], {
+  const res = await nmpaSearch.enrichProducts(targets, {
     onProgress: (core, e) => { if (e && e.confidence !== 'none') log(`  [NMPA] ${core}: ✅ ${Object.keys(e.facts || {}).slice(0, 3).join(',')}`); }
   });
   const hitRate = res.total ? (res.hits / res.total * 100).toFixed(0) : 0;
