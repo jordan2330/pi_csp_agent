@@ -11,6 +11,9 @@
  */
 
 const https = require('https');
+// 强制 IPv4 优先：WSL(mirrored) 下 clinicaltrials.gov 可能被解析到 IPv6，
+// 连接能建立但数据不通，导致请求永久卡死（curl 走 IPv4 所以正常）。2026-09 实测踩坑。
+require('dns').setDefaultResultOrder('ipv4first');
 const fs = require('fs');
 const path = require('path');
 const { extractProductName, extractDosageForm } = require('./enrichment');

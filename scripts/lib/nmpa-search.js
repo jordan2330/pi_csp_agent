@@ -29,6 +29,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const https = require('https');
+require('dns').setDefaultResultOrder('ipv4first');   // 同 sources.js：避免 IPv6 路径卡死
 
 const WS = path.resolve(__dirname, '..', '..');
 const CONFIG_FILE = path.join(WS, 'config', 'nmpa-search.json');
