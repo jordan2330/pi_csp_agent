@@ -246,6 +246,20 @@ function buildLeadModel(snapshot, scenario, isFull) {
     catch (e) { console.error('分类一致性修正失败:', e.message); }
   }
 
+  // ── 分类依据标注（透明化：该行的分类标签是查证过的还是推断的）──
+  //   搜索证据 = 标签与 NMPA 搜索证据一致（可查证）
+  //   规则（证据不适用） = 该品种有证据，但因原研企业/代码号/改良型名称被排除
+  //   规则推断 = 无可用证据
+  for (const api of Object.values(enrichedApis)) {
+    for (const t of api.trials) {
+      const n = t.nmpa;
+      const cls = t.drugClassification || '未分类';
+      if (!n) { t.classBasis = '规则推断'; continue; }
+      const byEv = n.generic ? '仿制药' : (n.improved ? '新药（改良型）' : (n.innovative ? '新药' : null));
+      t.classBasis = (byEv && cls === byEv) ? '搜索证据' : '规则（证据不适用）';
+    }
+  }
+
   // ── Category grouping ──
   const byCat = {};
   config.category.order.forEach(c => { byCat[c] = []; });

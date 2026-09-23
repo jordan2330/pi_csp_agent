@@ -35,6 +35,7 @@ const HEADERS = [
   { key: 'drugName', header: '产品名称', width: 26 },
   { key: 'dosageForm', header: '剂型', width: 20 },
   { key: 'drugClass', header: '药物分类', width: 14 },
+  { key: 'classBasis', header: '分类依据', width: 16 },
   { key: 'regClass', header: '注册分类', width: 10 },
   { key: 'iec', header: '一致性评价', width: 13 },
   { key: 'nmpaSrc', header: '证据来源', width: 20 },
@@ -78,6 +79,7 @@ function flattenTrials(ctx, onlyNew = false) {
         drugName: t.drugName || '',
         dosageForm: t.dosageForm || '',
         drugClass: t.drugClassification || '未分类',
+        classBasis: t.classBasis || '规则推断',
         regClass: (t.nmpa && t.nmpa.regClass) || '',
         iec: (t.nmpa && t.nmpa.iec) || '',
         nmpaSrc: (() => { try { return t.nmpa && t.nmpa.url ? new URL(t.nmpa.url).hostname.replace(/^www\./, '') : ''; } catch (_) { return ''; } })(),
@@ -216,6 +218,15 @@ function buildOverviewSheet(wb, ctx, rows, isFull) {
   rows.forEach(r => { formCount[r.dosageForm] = (formCount[r.dosageForm] || 0) + 1; });
   Object.entries(formCount).sort((a, b) => b[1] - a[1]).forEach(([f, n]) => kv(f, `${n} 条 (${fmtPct(n, rows.length)})`));
   ws.addRow([]);
+
+  title('药物分类依据（可信度）');
+  {
+    const basis = {};
+    rows.forEach(r => { basis[r.classBasis] = (basis[r.classBasis] || 0) + 1; });
+    Object.entries(basis).sort((a, b) => b[1] - a[1]).forEach(([k, v]) =>
+      kv(k, `${v} 行 (${fmtPct(v, rows.length)})${k === '搜索证据' ? ' — 标签与 NMPA 搜索证据一致' : k === '规则（证据不适用）' ? ' — 该品种有证据但按原研/代码号/改良型排除' : ' — 无可用证据'}`));
+    ws.addRow([]);
+  }
 
   title('药物分类分布');
   const classCount = {};

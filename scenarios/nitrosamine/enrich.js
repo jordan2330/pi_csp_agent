@@ -175,9 +175,11 @@ function refineClassifications(trials) {
       t.drugClassification = IMPROVED_NAME.test(name) ? '新药（改良型）' : '新药';
       continue;
     }
-    if (IMPROVED_NAME.test(name)) { t.drugClassification = '新药（改良型）'; continue; }
-    if (n.generic) t.drugClassification = '仿制药';
-    else if (n.innovative) t.drugClassification = '新药';
+    // 顺序要点：**仿制证据优先于名称启发式**——缓释/复方既可能是 2 类改良型，
+    // 也可能是原研缓释/复方产品的 4 类仿制（如盐酸他喷他多缓释片），名称本身分不出来。
+    if (n.generic) { t.drugClassification = '仿制药'; continue; }
+    if (IMPROVED_NAME.test(name) || n.improved) { t.drugClassification = '新药（改良型）'; continue; }
+    if (n.innovative) t.drugClassification = '新药';
   }
 }
 
