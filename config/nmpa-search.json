@@ -1,7 +1,7 @@
 {
-  "_comment": "NMPA 注册分类/一致性评价的搜索富化（博查 API）。证据抽取与门控规则见 scripts/lib/nmpa-search.js",
+  "_comment": "博查搜索富化（**兜底数据源**）：CDE 官方受理数据（config/cde-classify.json）已覆盖的品种会被自动跳过，博查只补 CDE 查不到的品种",
   "enabled": true,
-  "max_queries_per_run": 100,
+  "max_queries_per_run": 30,
   "cache_ttl_days": 90,
   "delay_between_queries_ms": 1500,
   "ai_search_escalation": false,

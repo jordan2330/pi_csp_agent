@@ -1,0 +1,11 @@
+{
+  "_comment": "CDE 官方受理品种信息 → 注册分类证据（Phase 2c 主数据源，免费）。逻辑见 scripts/lib/cde-classify.js",
+  "enabled": true,
+  "cache_ttl_days": 90,
+  "max_pages_per_product": 2,
+  "page_size": 50,
+  "delay_between_products_ms": [700, 1300],
+  "query_timeout_ms": 20000,
+  "max_products_per_run": 300,
+  "workers": 1
+}

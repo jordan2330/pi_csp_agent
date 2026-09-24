@@ -322,7 +322,7 @@ function classifyFacts(entry) {
     improved: !!(f.improved || f.aiImproved),
     generic: !!(f.genericClass34 || f.iec || f.firstGeneric || f.aiGeneric || f.aiIec || f.aiFirstGeneric),
     iecPassed: !!(f.iec || f.aiIec),
-    regClass: f.genericClass34 ? (String(f.genericClass34).match(/[34]/) || [])[0] : (f.innovative ? '1' : (f.improved ? '2' : ''))
+    regClass: f.regClassDisp || (f.genericClass34 ? (String(f.genericClass34).match(/[345]/) || [])[0] : (f.innovative ? '1' : (f.improved ? '2' : '')))
   };
 }
 

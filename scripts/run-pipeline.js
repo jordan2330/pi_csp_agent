@@ -74,6 +74,7 @@ cutoff.setFullYear(cutoff.getFullYear() - LOOKBACK_YEARS);
 const FDA_FILE = path.join(WS, scenarioConfig.cache_file);
 const sources = require(path.join(__dirname, 'lib/sources.js'));
 const nmpaSearch = require(path.join(__dirname, 'lib', 'nmpa-search.js'));
+const cdeClassify = require(path.join(__dirname, 'lib', 'cde-classify.js'));
 const snapshotLib = require(path.join(__dirname, 'lib/snapshot.js'));
 const reportLib = require(path.join(__dirname, 'lib/report.js'));
 
@@ -519,14 +520,42 @@ async function phase2b_cdt(allApis, isFull) {
 // ══════════════════════════════════════════════════
 async function phase2c_nmpaEnrich() {
   log('');
-  log('═══ Phase 2c: 法规分类富化（NMPA 注册分类/一致性评价）═══');
+  log('═══ Phase 2c: 法规分类富化（注册分类/一致性评价）═══');
 
+  // 2c-1: CDE 官方受理品种信息（主数据源，免费、一手）
+  const cdeCfg = cdeClassify.loadConfig();
+  let cdeRes = { queried: 0, hits: 0, failed: 0, skippedBudget: 0 };
+  if (cdeCfg.enabled) {
+    const cdeTargets = cdeClassify.collectTargets(fda.apis);
+    log(`[CDE] 官方受理数据: 目标 ${cdeTargets.length} 个品种 | 预算 ${cdeCfg.max_products_per_run} | 缓存 TTL ${cdeCfg.cache_ttl_days} 天`);
+    try {
+      const beforeN = Object.keys(cdeClassify.loadCache().products || {}).length;
+      const r = await cdeClassify.enrichProducts(cdeTargets, {
+        onProgress: (core, e) => { if (e && e.confidence === 'high') log(`  [CDE] ${core}: ✅ ${e.note}`); }
+      });
+      const vals = Object.values(cdeClassify.loadCache().products || {});
+      cdeRes = { queried: r.queried, hits: vals.filter(e => e.confidence === 'high').length, failed: r.failed, skippedBudget: r.skippedBudget, beforeN };
+      log(`[CDE] 完成: 新查询 ${r.queried} 个品种 | 有分类信号 ${cdeRes.hits} 个 | 缓存 ${vals.length} 个（原 ${beforeN}）`);
+      if (r.skippedBudget > 0) log(`⚠️ [CDE] 超预算跳过 ${r.skippedBudget} 个品种（可调 config/cde-classify.json → max_products_per_run）`);
+    } catch (e) {
+      log(`⚠️ [CDE] 采集失败，降级到博查: ${e.message}`);
+      fs.appendFileSync(ERR_LOG, `[${new Date().toISOString()}] [CDE-FAIL] ${e.message}\n`);
+    }
+  } else {
+    log('[CDE] 已禁用（config/cde-classify.json → enabled=false）');
+  }
+
+  // 2c-2: 博查搜索富化（兜底：CDE 查不到时用；默认只补未覆盖品种）
   const cfg = nmpaSearch.loadConfig();
   if (!cfg.enabled) { log('已禁用（config/nmpa-search.json → enabled=false）'); return { queried: 0, hits: 0, total: 0, skippedBudget: 0 }; }
   if (!nmpaSearch.getApiKey()) { log('跳过：未配置博查 API Key（BOCHA_API_KEY 或 ~/.pi/web-search.json）'); return { queried: 0, hits: 0, total: 0, skippedBudget: 0 }; }
 
   // 待富化品种 = API 中文名 + 中文产品核心名（与 CLI --all-targets 共用同一函数）
-  const targets = nmpaSearch.collectTargets(fda.apis);
+  // 已被 CDE 覆盖（有分类信号）的品种不再花博查额度
+  const cdeCovered = new Set(Object.values(cdeClassify.loadCache().products || {})
+    .filter(e => e.confidence === 'high').map(e => nmpaSearch.coreName(e.core || '')));
+  const targets = nmpaSearch.collectTargets(fda.apis).filter(t => !cdeCovered.has(nmpaSearch.coreName(t)));
+  if (cdeCovered.size) log(`[博查] 跳过 CDE 已覆盖的 ${cdeCovered.size} 个品种`);
   log(`待富化品种: ${targets.length} 个 | 查询预算: ${cfg.max_queries_per_run} 次 | 缓存 TTL: ${cfg.cache_ttl_days} 天`);
 
   const beforeCache = nmpaSearch.loadCache();

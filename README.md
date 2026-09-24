@@ -136,7 +136,7 @@ cat config/fda_nitrosamines.json | python3 -m json.tool | head -20
 | 透皮贴剂/柔性包装 | Activ-Film® | 包装形态 |
 | 注射/气雾剂 | 标注「低相关/需评估」，不再硬塞产品 | — |
 
-**报告字段**：涉及API、分类依据（搜索证据/规则推断，标明标签可信度）、注册分类（1类创新/2类改良/3-4类仿制）、一致性评价（过评=已上市仿制、有真实产能）、证据来源、产品名称（CDT 中文商品名 / CT.gov 干预名）、剂型（⭐口服固体加粗）、药物分类（仿制药/原研药/新药/新药（改良型）/观察性研究）、企业联系方式（联系人/电话/邮箱/地址）、试验状态、登记号与日期、来源（CDT/CT.gov）、本次是否新增。
+**报告字段**：涉及API、分类依据（官方证据(CDE)/搜索证据/规则推断，标明标签可信度）、注册分类（1类创新/2类改良/3-4类仿制）、一致性评价（过评=已上市仿制、有真实产能）、证据来源、产品名称（CDT 中文商品名 / CT.gov 干预名）、剂型（⭐口服固体加粗）、药物分类（仿制药/原研药/新药/新药（改良型）/观察性研究）、企业联系方式（联系人/电话/邮箱/地址）、试验状态、登记号与日期、来源（CDT/CT.gov）、本次是否新增。
 
 **模式差异**：增量模式下两个交付物（xlsx/md）**都只含新增商机**（Excel sheet 名带 `新增-` 前缀）；全量模式才含完整列表。
 
@@ -272,7 +272,7 @@ cat .pi/settings.json
 ### scripts/ 目录说明
 
 `scripts/` 目录包含运维脚本，已纳入版本控制：
-- `run-pipeline.js` — **主入口**（Agent 自动调用）：场景感知的瘦编排器，串联 CT.gov→CDT→快照→报告
+- `run-pipeline.js` — **主入口**（Agent 自动调用）：场景感知的瘦编排器，串联 CT.gov→CDT→CDE分类富化→快照→报告
 - `launch-chrome.sh` — 启动 Windows 侧真实 Chrome（专用 profile + CDP 端口 9223），pipeline 会在端点不可用时自动调用
 - `reset-and-search.sh` — 从零全量重置（清缓存 + 双源重扫 + 报告），用法 `bash scripts/reset-and-search.sh nitrosamine`
 - `lib/` — 通用层（跨场景复用）：
@@ -313,6 +313,7 @@ pi-csp-agent/
 │   ├── models.json                    # Qwen 模型配置（复制到 ~/.pi/agent/models.json）
 │   ├── api_translations.json          # API 中英对照表（104对，来源USP参考文件）
 │   ├── cdt-throttle.json              # CDT 请求节奏控制
+│   ├── cde-classify.json              # CDE 官方受理品种信息采集配置（分类富化主源）
 │   ├── fda_nitrosamines.json          # FDA 数据缓存（双源搜索状态机，自动生成）
 │   └── search-config.json             # 搜索模式配置（full/incremental）
 ├── skills/browser_executor/
@@ -333,6 +334,7 @@ pi-csp-agent/
 │   ├── reset-and-search.sh            # 从零全量重置脚本
 │   └── lib/                           # 通用层（跨场景复用）
 │       ├── sources.js                 # CT.gov REST + CDT 浏览器采集
+│       ├── cde-classify.js            # CDE 受理品种信息 → 注册分类证据（官方一手，免费）
 │       ├── enrichment.js              # 剂型检测 / 产品名抽取
 │       ├── snapshot.js                # 快照 + 增量检测
 │       ├── report.js                  # Markdown 渲染器

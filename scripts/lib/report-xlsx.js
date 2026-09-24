@@ -82,7 +82,14 @@ function flattenTrials(ctx, onlyNew = false) {
         classBasis: t.classBasis || '规则推断',
         regClass: (t.nmpa && t.nmpa.regClass) || '',
         iec: (t.nmpa && t.nmpa.iec) || '',
-        nmpaSrc: (() => { try { return t.nmpa && t.nmpa.url ? new URL(t.nmpa.url).hostname.replace(/^www\./, '') : ''; } catch (_) { return ''; } })(),
+        nmpaSrc: (() => {
+          const n = t.nmpa; if (!n) return '';
+          const u = n.url || '';
+          if (n.source === 'cde') return 'CDE 官方';
+          if (n.source === 'cde+bocha') return 'CDE 官方 + 博查';
+          if (!u) return '';
+          try { return new URL(u).hostname.replace(/^www\./, ''); } catch (_) { return u; }
+        })(),
         status: t.status || '',
         indication: t.indication || t.briefTitle || '',
         phase: t.phase || '',
@@ -224,7 +231,7 @@ function buildOverviewSheet(wb, ctx, rows, isFull) {
     const basis = {};
     rows.forEach(r => { basis[r.classBasis] = (basis[r.classBasis] || 0) + 1; });
     Object.entries(basis).sort((a, b) => b[1] - a[1]).forEach(([k, v]) =>
-      kv(k, `${v} 行 (${fmtPct(v, rows.length)})${k === '搜索证据' ? ' — 标签与 NMPA 搜索证据一致' : k === '规则（证据不适用）' ? ' — 该品种有证据但按原研/代码号/改良型排除' : ' — 无可用证据'}`));
+      kv(k, `${v} 行 (${fmtPct(v, rows.length)})${k === '官方证据(CDE)' ? ' — 标签与 CDE 官方受理数据一致（可查证）' : k === '搜索证据' ? ' — 标签与博查搜索证据一致' : k === '规则（证据不适用）' ? ' — 该品种有证据但按原研/代码号/改良型排除' : ' — 无可用证据'}`));
     ws.addRow([]);
   }
 
@@ -234,20 +241,23 @@ function buildOverviewSheet(wb, ctx, rows, isFull) {
   Object.entries(classCount).sort((a, b) => b[1] - a[1]).forEach(([c, n]) => kv(c, `${n} 条 (${fmtPct(n, rows.length)})`));
   ws.addRow([]);
 
-  // 法规分类证据（Phase 2c 搜索富化）
+  // 法规分类证据（Phase 2c：CDE 官方受理数据 为主，博查搜索 为兜底）
   try {
     const nm = require('./nmpa-search');
-    const cache = nm.loadCache();
-    const entries = Object.values(cache.products || {}).filter(e => e.confidence !== 'none');
-    const withIec = entries.filter(e => nm.classifyFacts(e).iecPassed).length;
-    const withReg = entries.filter(e => nm.classifyFacts(e).regClass).length;
-    const calls = Object.values(cache.products || {}).reduce((a, e) => a + (e.queries || 0), 0);
-    title('法规分类证据（NMPA 搜索富化）');
-    kv('已查品种', Object.keys(cache.products || {}).length + ' 个（累计查询 ' + calls + ' 次）');
-    kv('取得证据的品种', entries.length + ' 个');
-    kv('  其中含"注册分类"', withReg + ' 个（1类创新/2类改良/3-4类仿制）');
-    kv('  其中含"一致性评价"', withIec + ' 个（过评 = 已上市仿制、有真实产能）');
-    kv('说明', '空白的注册分类/一致性评价列 = 该品种未取得搜索证据（不等于没有），分类回落规则推断');
+    const cde = require('./cde-classify');
+    const cdeCache = cde.loadCache();
+    const cdeAll = Object.values(cdeCache.products || {});
+    const cdeSig = cdeAll.filter(e => e.confidence === 'high').length;
+    const cdeReg = cdeAll.filter(e => e.confidence === 'high' && (e.facts || {}).regClassDisp).length;
+    const bCache = nm.loadCache();
+    const bEntries = Object.values(bCache.products || {}).filter(e => e.confidence !== 'none');
+    const bCalls = Object.values(bCache.products || {}).reduce((a, e) => a + (e.queries || 0), 0);
+    title('法规分类证据（Phase 2c）');
+    kv('CDE 官方受理数据（主）', Object.keys(cdeCache.products || {}).length + ' 个品种已查，' + cdeSig + ' 个有分类信号'
+      + (cdeReg ? '（其中 ' + cdeReg + ' 个含注册分类）' : ''));
+    kv('博查搜索（兜底）', Object.keys(bCache.products || {}).length + ' 个品种已查（累计查询 ' + bCalls + ' 次），' + bEntries.length + ' 个取得证据');
+    kv('说明', '空白的注册分类/一致性评价列 = 该品种未取得证据（不等于没有），分类回落规则推断');
+    kv('数据源', 'CDE 受理品种信息 = 官方一手申报数据（免费）；博查 = 搜索二手信息，仅用于 CDE 未覆盖的品种');
     ws.addRow([]);
   } catch (_) { /* 未启用搜索富化 */ }
 

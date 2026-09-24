@@ -33,7 +33,8 @@ This is a Pi Coding Agent project for CSP (Aptar active packaging) sales lead di
   - `lib/snapshot.js` — 快照管理 + 增量检测
   - `lib/report.js` — 通用 Markdown 报告渲染器（由 scenario.json + enrich.js 驱动）
   - `lib/report-xlsx.js` — 通用 Excel 渲染器（5 sheet：概览 / P1-口服固体 / P2-其他剂型 / 全部商机 / 按API汇总）
-  - `lib/nmpa-search.js` — 法规分类富化：博查搜索抽取 NMPA 注册分类/一致性评价证据（品种名门控 + 归属判定 + 缓存/预算）
+  - `lib/cde-classify.js` — **法规分类富化（主数据源）**：CDE 官方受理品种信息 → 注册分类 1/2/3/4/5.2类（免费、一手；真实浏览器 DOM 提取）
+  - `lib/nmpa-search.js` — 法规分类富化（兜底）：博查搜索抽取注册分类/一致性评价证据（品种名门控 + 归属判定 + 缓存/预算）
 - `prompts/` — Pi prompt templates (entry points like `/lead-scan`)
 - `config/` — Cached data and model configuration
   - `models.json` — LLM 模型配置
@@ -58,7 +59,8 @@ This is a Pi Coding Agent project for CSP (Aptar active packaging) sales lead di
 - 本地运行（WSL Ubuntu 22），不使用容器；仓库根目录即工作目录，脚本路径一律用 `__dirname` 推导或相对路径，禁止硬编码绝对路径
 - 浏览器采集依赖 Windows 侧真实 Chrome：由 `scripts/launch-chrome.sh` 启动专用 profile（CDP 端口 9223），WSL 需 mirrored 网络模式（`.wslconfig`: `networkingMode=mirrored`）；`BROWSER_ENDPOINT` 可覆盖默认端点
 - 法规分类富化（Phase 2c）需 `BOCHA_API_KEY`（或 `~/.pi/web-search.json` 的 bochaApiKey）；预算与开关见 `config/nmpa-search.json`
-- 药物分类优先级：**搜索证据（NMPA 注册分类/一致性评价）> 规则推断 > 组内统一**；证据缺失时不改判
+- 药物分类优先级：**CDE 官方受理数据 > 博查搜索证据 > 规则推断 > 组内统一**；证据缺失时不改判
+- **第三方商业数据源合规红线**：医药魔方 PharmaGO/TrialiCube《用户服务协议》第 2.4 条**明令禁止一切自动化访问**（违反者封号且不退费）→ **禁止**对 pharmcube 系站点写爬虫；只用其人工导出结果做交叉校验，且不长期囤积成自有数据库。CDE/CT.gov 等政府公开数据源无此限制
 - CDT 检索必须用**药物名称精确匹配**（`drugs_name` + `drugs_type=2`，二级查询）；禁止用 `keywords` 全文检索——它会把"正文提及"当成"有效成分"（搜他莫昔芬返回阿贝西利片/依西美坦片）
 - CDT 已启用瑞数动态安全（Riverdance：JS 质询 + 浏览器指纹检测），必须使用真实浏览器采集；headless/自动化浏览器会被拦截，且不得注入伪造指纹（伪造值本身是可识别特征）
 

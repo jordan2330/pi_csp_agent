@@ -118,8 +118,9 @@ function buildLeadModel(snapshot, scenario, isFull) {
   const results = snapshot.trials_data.results;
 
   // 法规分类证据缓存（Phase 2c 产出；缺失/未启用时静默降级为规则推断）
-  let nm = null, nmpaCache = { products: {} };
+  let nm = null, nmpaCache = { products: {} }, cdeCache = { products: {} };
   try { nm = require('./nmpa-search'); nmpaCache = nm.loadCache(); } catch (_) {}
+  try { cdeCache = require('./cde-classify').loadCache(); } catch (_) {}
 
   // ── Build apiInfo ──
   const apiInfo = {};
@@ -165,15 +166,31 @@ function buildLeadModel(snapshot, scenario, isFull) {
           || (apiName && drugRaw.toLowerCase().includes(String(apiName).toLowerCase()))
           || (api.name_cn && drugRaw.includes(api.name_cn));
         // ① 产品级证据（试验品种精确命中）优先；② API 级证据仅在归属成立时使用
-        let entry = nmpaCache.products[drugCore] || null;
-        if (!entry && belongs && cnCore) entry = nmpaCache.products[cnCore] || null;
-        if (!entry || entry.confidence === 'none') return null;
-        const f = nm.classifyFacts(entry);
+        // 证据优先级：CDE 官方受理数据（一手） > 博查搜索证据（二手）
+        const pick = (cache, source) => {
+          let e = cache.products[drugCore] || null;
+          if (!e && belongs && cnCore) e = cache.products[cnCore] || null;
+          return (e && e.confidence !== 'none') ? { entry: e, source } : null;
+        };
+        const cdeHit = pick(cdeCache, 'cde');
+        const bochaHit = pick(nmpaCache, 'bocha');
+        if (!cdeHit && !bochaHit) return null;
+        // 证据合并：注册分类/创新改良 以 CDE 官方为准（权威）；**一致性评价（过评）用博查补齐**
+        // （CDE 受理目录只覆盖"按一致性评价申报"的受理记录，历史过评品种多在博查新闻里）
+        const cdeFacts = (cdeHit && cdeHit.entry.facts) || {};
+        const bochaFacts = (bochaHit && bochaHit.entry.facts) || {};
+        const facts = { ...bochaFacts, ...cdeFacts };
+        const iecFromBocha = !!(bochaFacts.iec && !cdeFacts.iec);
+        if (iecFromBocha) facts.iec = true;
+        const entry = (cdeHit || bochaHit).entry;
+        const f = nm.classifyFacts({ facts });
         return {
           regClass: f.regClass || '', iec: f.iecPassed ? '通过/视同通过' : '',
           generic: f.generic, innovative: f.innovative, improved: f.improved,
           confidence: entry.confidence,
-          url: (entry.sources || [])[0] || '',
+          source: cdeHit ? (bochaHit ? 'cde+bocha' : 'cde') : 'bocha',
+          note: [entry.note || '', iecFromBocha ? '过评证据来自博查' : ''].filter(Boolean).join(' / '),
+          url: ((cdeHit ? cdeHit.entry.sources : bochaHit.entry.sources) || [])[0] || '',
           evidence: ((entry.evidence || [])[0] || {}).text || ''
         };
       })();
@@ -256,7 +273,9 @@ function buildLeadModel(snapshot, scenario, isFull) {
       const cls = t.drugClassification || '未分类';
       if (!n) { t.classBasis = '规则推断'; continue; }
       const byEv = n.generic ? '仿制药' : (n.improved ? '新药（改良型）' : (n.innovative ? '新药' : null));
-      t.classBasis = (byEv && cls === byEv) ? '搜索证据' : '规则（证据不适用）';
+      t.classBasis = (byEv && cls === byEv)
+        ? (String(n.source || '').startsWith('cde') ? '官方证据(CDE)' : '搜索证据')
+        : '规则（证据不适用）';
     }
   }
 
