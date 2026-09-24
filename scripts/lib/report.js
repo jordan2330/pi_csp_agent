@@ -167,10 +167,12 @@ function buildLeadModel(snapshot, scenario, isFull) {
           || (api.name_cn && drugRaw.includes(api.name_cn));
         // ① 产品级证据（试验品种精确命中）优先；② API 级证据仅在归属成立时使用
         // 证据优先级：CDE 官方受理数据（一手） > 博查搜索证据（二手）
+        // 依次尝试：产品级证据 → API 级证据（仅当归属成立）；跳过 confidence=none 的条目
+        // 注意必须"逐个校验后再回退"：产品级查到但无记录时也要回退到 API 级（否则漏证据）
         const pick = (cache, source) => {
-          let e = cache.products[drugCore] || null;
-          if (!e && belongs && cnCore) e = cache.products[cnCore] || null;
-          return (e && e.confidence !== 'none') ? { entry: e, source } : null;
+          const cands = [cache.products[drugCore], (belongs && cnCore) ? cache.products[cnCore] : null];
+          const e = cands.find(x => x && x.confidence !== 'none');
+          return e ? { entry: e, source } : null;
         };
         const cdeHit = pick(cdeCache, 'cde');
         const bochaHit = pick(nmpaCache, 'bocha');
