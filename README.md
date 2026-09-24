@@ -1,5 +1,7 @@
 # Pi CSP Agent — 亚硝胺商机发掘
 
+> ✅ **当前稳定基线：`v3.3-stable`**（代码 v3.3.4，2026-09-23）—— 版本索引与标记约定见 [CHANGELOG.md](CHANGELOG.md)
+
 基于 [Pi Coding Agent](https://pi.dev) 的 CSP（Aptar 活性包装）销售商机自动发掘系统。Agent 自动抓取 FDA 亚硝胺杂质风险 API 列表，逐一在中国药物临床试验登记平台搜索相关临床试验，匹配客户画像并生成包含 CSP 产品推荐的 Markdown 商机报告。
 
 ## 架构概览

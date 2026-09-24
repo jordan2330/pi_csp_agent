@@ -1,5 +1,6 @@
 .env
 output/runs/
+output/releases/
 output/CSP_Leads_Report.md
 node_modules/
 **/package-lock.json

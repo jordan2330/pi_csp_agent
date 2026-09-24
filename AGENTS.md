@@ -49,6 +49,7 @@ This is a Pi Coding Agent project for CSP (Aptar active packaging) sales lead di
 
 ## Key Conventions
 
+- **版本标记约定**（见 `CHANGELOG.md`）：稳定基线用不可变 tag `<major>.<minor>-stable`；无后缀 tag = 稳定版；实验性大改一律带 `-dev`/`-rc.N` 后缀且不得交付销售
 - All SKILL.md and prompt instructions are written in Simplified Chinese
 - browser.js uses "script mode" (JSON step file) for multi-step browser interactions — each invocation is a separate process, so page state cannot persist across calls
 - Pipeline 核心逻辑在 `scripts/run-pipeline.js` 中，通过 `scenario.json` + `enrich.js` 实现场景无关化
