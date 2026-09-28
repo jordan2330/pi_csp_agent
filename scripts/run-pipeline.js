@@ -43,6 +43,12 @@ const CDT_DELAY_RANGE = CDT_THROTTLE.delay_between_apis_ms || [5000, 8000];
 const FDA_REFRESH_DAYS = 90;  // FDA 列表建议刷新周期
 const today = new Date();
 const todayStr = today.toISOString().slice(0, 10);
+// 运行批次时间戳（本地时间，用于 Excel 批次历史与 ★ 标记的口径说明）
+function runStamp() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${todayStr} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
 // 数据时间窗起点：由 scenario.json 的 lookback_years 决定，加载场景后赋值
 let cutoff;
 let LOOKBACK_YEARS = 2;
@@ -75,6 +81,7 @@ const FDA_FILE = path.join(WS, scenarioConfig.cache_file);
 const sources = require(path.join(__dirname, 'lib/sources.js'));
 const nmpaSearch = require(path.join(__dirname, 'lib', 'nmpa-search.js'));
 const cdeClassify = require(path.join(__dirname, 'lib', 'cde-classify.js'));
+const historyLib = require(path.join(__dirname, 'lib', 'history.js'));
 const snapshotLib = require(path.join(__dirname, 'lib/snapshot.js'));
 const reportLib = require(path.join(__dirname, 'lib/report.js'));
 
@@ -591,6 +598,30 @@ async function phase3_report(isFull) {
     log(`增量检测: ${totalLeads} 条商机中 ${newCount} 条为新增（对比前次快照）`);
   }
 
+  // ── 沉淀账本：给每条商机挂 first_seen/last_seen；把缓存里已消失的历史行并入 ──
+  const allTrials = [];
+  Object.entries(results).forEach(([apiName, rows]) => {
+    (rows || []).forEach(t => { if (!t.apiName) t.apiName = apiName; allTrials.push(t); });
+  });
+  const hist = historyLib.apply(allTrials, { date: todayStr, run: runStamp() });
+  const archivedByApi = {};
+  hist.archived.forEach(t => { (archivedByApi[t.apiName || '其他'] = archivedByApi[t.apiName || '其他'] || []).push(t); });
+  Object.entries(archivedByApi).forEach(([api, rows]) => { results[api] = [...(results[api] || []), ...rows]; });
+  if (hist.archived.length) log(`归档行并入: ${hist.archived.length} 条（缓存里已不存在的历史商机）`);
+  log(`沉淀账本: 累计 ${hist.total} 条商机 | 本次首见 ${hist.newCount} 条 | 本批次标记新增 ${newCount} 条`);
+
+  const srcCount = {};
+  allTrials.forEach(t => { srcCount[t.source] = (srcCount[t.source] || 0) + 1; });
+  let cdeStat = { total: 0, signals: 0 };
+  try {
+    const cdeProducts = Object.values(cdeClassify.loadCache().products || {});
+    cdeStat = { total: cdeProducts.length, signals: cdeProducts.filter(e => e.confidence === 'high').length };
+  } catch (_) {}
+  historyLib.appendRun({
+    run: runStamp(), date: todayStr, new: newCount, total: totalLeads,
+    archived: hist.archived.length, sources: srcCount, enrich: { cde_products: cdeStat.total, cde_signals: cdeStat.signals }
+  });
+
   const { snapshot, snapFile } = snapshotLib.saveSnapshot({
     fda, results, totalLeads, todayStr, runsDir: RUNS_DIR,
     cacheVersionField: scenarioConfig.cache_version_field,
@@ -598,20 +629,11 @@ async function phase3_report(isFull) {
   });
   log(`快照已保存: ${snapFile}`);
 
-  try {
-    const r = reportLib.generateReport(snapshot, scenario, isFull);
-    log(`报告已生成: ${r.outputPath}`);
-    log(`统计: ${r.totalLeads} leads, ${r.totalNewLeads} new, ${r.apisWithLeadsCount} APIs with leads`);
-  } catch (e) {
-    log(`报告生成失败: ${e.message}`);
-    if (e.stack) log(e.stack.substring(0, 500));
-  }
-
   // ── Excel（主交付物：销售可直接筛选/透视）──
   try {
     const xlsxLib = require(path.join(__dirname, 'lib', 'report-xlsx.js'));
     const r = await xlsxLib.generateWorkbook(snapshot, scenario, isFull);
-    log(`Excel 已生成: ${r.xlsxPath} （P1-口服固体 ${r.p1} 条 / P2-其他剂型 ${r.p2} 条）`);
+    log(`Excel 已生成: ${r.xlsxPath} （累积 ${r.rows} 行 / 本次新增 ${r.newRows} 条；P1-口服固体 ${r.p1} 条 / P2-其他剂型 ${r.p2} 条）`);
   } catch (e) {
     log(`Excel 生成失败: ${e.message}（如缺依赖请执行 npm i 安装 exceljs）`);
   }
@@ -684,7 +706,7 @@ async function main() {
   log(`║ Pipeline 完成! 总耗时: ${mins} 分钟`);
   log(`║ CT.gov: ${ctgovStats.done} APIs, ${ctgovStats.totalStudies} fetched, ${ctgovStats.unchangedApis} 无变化, ${ctgovStats.totalNew || 0} 新增, ${ctgovStats.errors} errors`);
   log(`║ CDT:    ${cdtStats.done} APIs, ${cdtStats.totalTrials} new, ${cdtStats.skippedNoNew} 无新增, ${cdtStats.errors} errors`);
-  log(`║ 报告: ${scenarioConfig.report_file}`);
+  log(`║ 交付物: ${scenarioConfig.report_xlsx || 'output/CSP_Leads_Report.xlsx'}`);
   log('╚══════════════════════════════════════╝');
 }
 

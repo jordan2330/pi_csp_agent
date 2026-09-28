@@ -31,8 +31,9 @@ This is a Pi Coding Agent project for CSP (Aptar active packaging) sales lead di
   - `lib/sources.js` — 数据源统一接口（CT.gov REST API + CDT 浏览器脚本）
   - `lib/enrichment.js` — 剂型检测（中英文，词干匹配兼容复数/派生词）、产品名提取、剂型分组
   - `lib/snapshot.js` — 快照管理 + 增量检测
-  - `lib/report.js` — 通用 Markdown 报告渲染器（由 scenario.json + enrich.js 驱动）
-  - `lib/report-xlsx.js` — 通用 Excel 渲染器（5 sheet：概览 / P1-口服固体 / P2-其他剂型 / 全部商机 / 按API汇总）
+  - `lib/report.js` — 通用**数据模型**（buildLeadModel：窗口切分/证据挂载/分类；不再渲染 Markdown）
+  - `lib/report-xlsx.js` — 通用 Excel 渲染器（6 sheet：概览 / P1-口服固体 / P2-其他剂型 / 全部商机 / 按API汇总 / 批次历史）
+  - `lib/history.js` — 商机沉淀账本（首次发现/最近出现 + 运行批次档案 + 归档行合并）
   - `lib/cde-classify.js` — **法规分类富化（主数据源）**：CDE 官方受理品种信息 → 注册分类 1/2/3/4/5.2类（免费、一手；真实浏览器 DOM 提取）
   - `lib/nmpa-search.js` — 法规分类富化（兜底）：博查搜索抽取注册分类/一致性评价证据（品种名门控 + 归属判定 + 缓存/预算）
 - `prompts/` — Pi prompt templates (entry points like `/lead-scan`)
@@ -42,8 +43,9 @@ This is a Pi Coding Agent project for CSP (Aptar active packaging) sales lead di
   - `search-config.json` — 搜索模式控制（full / incremental）
   - `fda_nitrosamines.json` — FDA 缓存（运行时生成，不纳入版本控制）
 - `output/` — Generated reports and run snapshots
-  - `CSP_Leads_Report.xlsx` — **主交付物**（销售用 Excel：OSD 优先分组 + 自动筛选 + 可透视）
-  - `CSP_Leads_Report.md` — Markdown 报告（文本存档 / pi 摘要）
+  - `CSP_Leads_Report.xlsx` — **唯一交付物**（累积视图：全量沉淀 + 本次新增 ★ 浅绿高亮 + 批次历史）
+  - `history/ledger.json` — **沉淀账本**：每条商机的首次发现/最近出现（不随数据源缓存重置而丢失）
+  - `history/runs.json` — 运行批次档案（时间 / 新增 / 累计 / 数据源计数）
   - `runs/YYYY-MM-DD.json` — 运行快照（增量对比用）
   - `runs/errors.log` — 错误日志
 - `~/.pi/` — Pi 运行时主目录（sessions、auth、models.json），在本地家目录，不在仓库内
@@ -76,7 +78,12 @@ This is a Pi Coding Agent project for CSP (Aptar active packaging) sales lead di
 
 ## Report Output Rules
 
-- **增量模式 (`search_mode: incremental`)**: 报告只输出「新增商机」部分，不包含全量商机列表。全量数据过大，避免每次推送冗余内容。**两种交付物（xlsx / md）均遵守此规则**（Excel sheet 名前缀 `新增-`）。
-- **全量模式 (`search_mode: full`)**: 报告同时包含「新增商机」和「全量商机列表」。需要查看完整商机时使用此模式。
-- 此行为是项目设计约束，不可擅自修改。如需全量报告，临时设置 `search_mode: full` 后运行即可。
+- **交付物只有 Excel**（`output/CSP_Leads_Report.xlsx`）。Markdown 报告已移除（v4.1.0 起）——它的内容与 Excel 重复，且每轮 16 万字符对 pi 摘要无价值。
+- **Excel 一律是「累积视图」**（v4.1.0 起，取代旧的"增量模式只出新增"规则）：
+  - 每次都输出**全量沉淀**（上限外的历史行也在「全部商机」Sheet），本次新增用 **★ 列 + 整行浅绿底** 醒目标识
+  - `★ 本次新增` = 相对**上一次运行**的新增（本批次）；**首次发现** = 历史上第一次见到（沉淀账本，不随重扫重置）——两者不一致是正常的
+  - P1/P2 Sheet **只放窗口内活跃商机**（避免历史行稀释销售工作清单）；历史行只在「全部商机」+ 批次历史 Sheet
+  - 账本在 `output/history/`（gitignore 内，derived data）；落地逻辑见 `scripts/lib/history.js`
+- `search_mode`（incremental / full）现在**只控制数据抓取口径**，不再影响报告范围。
+- 此行为是项目设计约束，不可擅自改回"增量只出新增"。
 - **Excel 优先度排序（业务规则）**：口服固体制剂(OSD，含改良释放/颗粒散剂) 优先，按 AI limit 风险等级 Cat 1→5 分段；其次为其他剂型同样分段。CSP 推荐方案按**剂型**给出候选组合（依据 CSP 产品选型准则：包装形态优先），风险等级只决定优先级。

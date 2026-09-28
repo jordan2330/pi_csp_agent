@@ -37,6 +37,7 @@ description: 亚硝胺药物商机发掘场景。从FDA页面抓取亚硝胺杂�
 
 - **`"full"`**（全量模式）：重置所有 API 的搜索状态（CT.gov 缓存与 CDT 游标），重新搜索两个数据源，完成后自动改回 `"incremental"`
 - **`"incremental"`**（增量模式，默认）：每次运行仍遍历全部 API，但只增量拉取新增数据——CT.gov 每次全拉并与缓存 NCT ID 对比检测新增；CDT 用 `last_cdt_regno` 游标续搜，遇旧数据自动停止翻页
+- **注意**：`search_mode` 只控制**数据抓取口径**，不影响报告范围。Excel 永远是"累积视图"（见 Phase 3）
 
 ### 2. 检查 FDA 缓存
 
@@ -235,20 +236,28 @@ tail -20 output/runs/pipeline.log
   - `证据来源` 列：CDE → `CDE 官方`；博查 → 证据域名（如 nbd.com.cn）
   - 优先级要点：**仿制证据 > 名称启发式**——缓释/复方既可能是 2 类改良型，也可能是原研缓释/复方产品的 4 类仿制（如盐酸他喷他多缓释片），名称本身分不出来
 
-#### Phase 3: 快照 + 报告
+#### Phase 3: 快照 + 沉淀账本 + Excel（累积视图）
 - **增量检测：对比前次快照标记 isNew；同日二次运行对比当天已有快照，避免重复汇报新增**
 - 从 `config/fda_nitrosamines.json` 生成快照到 `output/runs/YYYY-MM-DD.json`
-- 调用 `scripts/lib/report.js`（Markdown）与 `scripts/lib/report-xlsx.js`（Excel）两个通用渲染器，均由 `scenarios/nitrosamine/scenario.json` + `enrich.js` 驱动
-- **交付物**：
-  - `output/CSP_Leads_Report.xlsx` — **主交付物**（销售用），5 个 sheet：
-    | Sheet | 内容 |
-    |---|---|
-    | 概览 | 统计 + 优先级说明 + 数据局限 |
-    | P1-口服固体 | OSD（含改良释放/颗粒散剂），**按 AI limit Cat 1→5 分段**，段内按企业数降序、进行中试验优先 |
-    | P2-其他剂型 | 非 OSD，同样按 Cat 分段 |
-    | 全部商机 | 扁平表（一行 = 一条试验）→ 数据透视/图表用 |
-    | 按API汇总 | 一行 = 一个 API（试验数/企业数/OSD 数/推荐方案）|
-  - `output/CSP_Leads_Report.md` — Markdown（pi 读取摘要 / 文本存档）
+- **沉淀账本（`scripts/lib/history.js`，v4.1.0 新增）**：
+  - `output/history/ledger.json` — 每条商机 `first_seen`（历史首次发现，**不随重扫/缓存重置而变**）+ `last_seen` + 最小明细副本
+  - `output/history/runs.json` — 每次运行的批次档案（时间/新增/累计/数据源/CDE 覆盖）
+  - 缓存里已消失的历史行会以 `archived: true` **并入快照**（缓存被重置也保住沉淀）
+  - 一次性回填：`node scripts/lib/history.js --backfill`（从 `output/runs/*.json` 推导 first_seen）
+- **交付物只有 `output/CSP_Leads_Report.xlsx`**（Markdown 报告已于 v4.1.0 移除），6 个 sheet：
+  | Sheet | 内容 |
+  |---|---|
+  | 概览 | 本批次信息 + **图例（★/首次发现/窗口状态）** + 统计（口径=窗口内活跃行）+ 数据局限 |
+  | P1-口服固体 | **仅窗口内** OSD（含改良释放/颗粒散剂），按 Cat 1→5 分段，段内按企业数降序、进行中优先 |
+  | P2-其他剂型 | 非 OSD，同样按 Cat 分段，仅窗口内 |
+  | 全部商机 | **累积全量**（含已过窗口/已归档）→ 数据透视/图表用 |
+  | 按API汇总 | 一行 = 一个 API（试验数/本次新增/历史行数/企业数/OSD 数/推荐方案）|
+  | 批次历史 | 一行 = 一次运行（时间/新增/当时商机数/归档/数据源/CDE 覆盖）+ 账本按首次发现批次累计 |
+- **累积视图与醒目规则**（v4.1.0 起取代旧的"增量只出新增"）：
+  - `★ 本次新增` 列 = 相对**上一次运行**的新增；该行**整行浅绿底**（`NEW_ROW_FILL`，盖过 Cat 底色——新增更紧迫，下批次自动恢复）
+  - `首次发现` 列 = 账本里的历史首次发现批次；`窗口状态` 列 = 窗口内 / 已过窗口 / 已归档
+  - ★ 与「首次发现」不一致是**正常**的：某条商机中途消失又出现会再标 ★（★ 看本批次，首次发现看历史）
+  - P1/P2 只放窗口内活跃商机（历史行稀释工作清单）；历史沉淀只在「全部商机」与「批次历史」
 - **优先度规则**：OSD+Cat1 → OSD+Cat2/3/4/5 → 其他剂型+Cat1/2/3/4/5（Sheet 顺序即优先级；组合视图用 Excel 自动筛选可秒出，不单独拆 sheet）
 - **去重口径**：Excel 中一行 = 一条试验（按 source+登记号 去重）；同一试验命中多个 API（如复方制剂）时用「涉及API(含Cat)」列标注，风险等级取其中最高
 - **分类优先级**：**CDE 官方证据 > 博查搜索证据 > 规则推断 > 组内统一**；代码号在研新药（如 TQC3927）不被品种级仿制证据覆盖
@@ -341,11 +350,12 @@ node scripts/run-pipeline.js nitrosamine
 | `config/api_translations.json` | API 英文名 → 中文名映射 |
 | `scenarios/nitrosamine/scenario.json` | 场景声明式配置（标题/表头列/CSP推荐矩阵/时间窗 lookback_years/缓存与报告路径） |
 | `scenarios/nitrosamine/enrich.js` | 场景专属 hooks（药物分类、CSP推荐、报告小标题等，由 `scripts/lib/report.js` 调用） |
-| `scripts/lib/` | 通用层：`sources.js`(双源采集) / `enrichment.js`(剂型检测) / `snapshot.js`(快照+增量) / `report.js`(通用渲染器) |
+| `scripts/lib/` | 通用层：`sources.js`(双源采集) / `enrichment.js`(剂型检测) / `snapshot.js`(快照+增量) / `cde-classify.js`(CDE 官方分类) / `nmpa-search.js`(博查兜底) / `history.js`(沉淀账本) / `report.js`(数据模型) / `report-xlsx.js`(Excel 渲染) |
 | `output/runs/YYYY-MM-DD.json` | 运行快照（用于增量对比） |
 | `output/runs/errors.log` | 搜索错误日志 |
-| `output/CSP_Leads_Report.xlsx` | **主交付物**：Excel（5 sheet，OSD 优先分组） |
-| `output/CSP_Leads_Report.md` | Markdown 报告（文本存档 / pi 摘要） |
+| `output/history/ledger.json` | **沉淀账本**：每条商机首次发现/最近出现（重扫不重置） |
+| `output/history/runs.json` | 运行批次档案（时间和新增/累计） |
+| `output/CSP_Leads_Report.xlsx` | **唯一交付物**：累积视图 Excel（6 sheet：概览/P1/P2/全部商机/按API汇总/批次历史） |
 
 ### 双源搜索状态跟踪
 

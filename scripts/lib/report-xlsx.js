@@ -1,14 +1,18 @@
 /**
  * Excel 导出（通用渲染器，由 scenarios/<name>/scenario.json 驱动）
  *
- * 输出（Sheet 顺序即业务优先级）：
- *   1. 概览          统计 + 用法 + 数据局限说明
- *   2. P1-口服固体     OSD（含改良释放/颗粒散剂），按 AI limit Cat 1→5 分段，段内按企业数排序
- *   3. P2-其他剂型     非 OSD，同样按 Cat 1→5 分段
- *   4. 全部商机        扁平表（一行 = 一条试验）→ 数据透视 / 图表用
+ * 输出（Sheet 顺序即业务优先级）——**累积视图**：每次都出全量，本次新增高亮：
+ *   1. 概览          统计 + 本批次信息 + 图例 + 数据局限说明
+ *   2. P1-口服固体     OSD（含改良释放/颗粒散剂），仅时间窗内；按 Cat 1→5 分段，★ 行浅绿底
+ *   3. P2-其他剂型     非 OSD，同上
+ *   4. 全部商机        累积全量（含已过窗口/已归档的历史行）→ 数据透视 / 图表用
  *   5. 按API汇总       一行 = 一个 API（管理视角）
+ *   6. 批次历史        一行 = 一次运行（时间 / 新增 / 累计）→ 看沉淀过程
  *
- * 说明：OSD+Cat1 等组合视图不需要单独 sheet——用 Excel 自动筛选（首行已开启）即可秒出。
+ * 沉淀口径（scripts/lib/history.js）：
+ *   ★ 本次新增 = 相对上一次运行的新增（本批次）   首次发现 = 历史上第一次见到（不随重扫重置）
+ *   P1/P2 只放"窗口内"的活跃商机（避免有效期已过的历史行稀释工作清单）；
+ *   历史/归档行只在「全部商机」里（窗口状态列标注）。
  */
 
 const fs = require('fs');
@@ -22,9 +26,11 @@ const WS = path.resolve(__dirname, '..', '..');
 // 进行中/可介入的试验状态优先（销售时机信号）
 const ACTIVE_STATUS = /进行中|招募|尚未招募|未招募|not yet recruiting|recruiting|active, not recruiting|enrolling/i;
 
+const NEW_ROW_FILL = 'FFE2F0D9';   // 本次新增行：浅绿底
 const CAT_COLORS = { 1: 'FFF2CCCC', 2: 'FFFCE4D6', 3: 'FFFFF2CC', 4: 'FFE2EFDA', 5: 'FFF2F2F2' };
 
 const HEADERS = [
+  { key: 'star', header: '★ 本次新增', width: 9 },
   { key: 'priority', header: '优先级', width: 12 },
   { key: 'cat', header: '风险等级', width: 16 },
   { key: 'apiCn', header: '主要API(中文)', width: 16 },
@@ -46,25 +52,26 @@ const HEADERS = [
   { key: 'phase', header: '分期', width: 20 },
   { key: 'regNo', header: '登记号/NCT', width: 14 },
   { key: 'regDate', header: '登记日期', width: 12 },
+  { key: 'firstSeen', header: '首次发现', width: 12 },
+  { key: 'windowState', header: '窗口状态', width: 10 },
   { key: 'contactName', header: '联系人', width: 10 },
   { key: 'contactPhone', header: '电话', width: 16 },
   { key: 'contactEmail', header: '邮箱', width: 26 },
   { key: 'contactAddress', header: '地址', width: 36 },
-  { key: 'source', header: '来源', width: 8 },
-  { key: 'isNew', header: '本次新增', width: 10 }
+  { key: 'source', header: '来源', width: 8 }
 ];
 
 // ── 把 model 变成"一行 = 一条试验"的扁平记录 ──
 // 同一试验（source + 登记号）可能命中多个 API（如复方制剂同时命中两个 API），
 // 此处合并为一行，用「涉及API」列标注全部关联 API，风险等级取其中最高（Cat 最小）。
-// onlyNew=true（增量模式）：只保留本次新增的试验
-function flattenTrials(ctx, onlyNew = false) {
+// scope='active' → 只取窗口内活跃商机（P1/P2 用）；scope='all' → 累积全量（全部商机用，含历史行）
+function flattenTrials(ctx, scope = 'all') {
   const raw = [];
   let seq = 0;
-  Object.values(ctx.enrichedApis).forEach(api => {
-    if (onlyNew && api.newTrialCount === 0) return;
-    api.trials.forEach(t => {
-      if (onlyNew && !t.isNew) return;
+  const apiEntries = Object.values(ctx.enrichedApis);
+  apiEntries.forEach(api => {
+    const trials = scope === 'active' ? api.trials : [...api.trials, ...(api.historyTrials || [])];
+    trials.forEach(t => {
       seq++;
       raw.push({
         // 无登记号时用自增键，避免被误合并
@@ -100,7 +107,9 @@ function flattenTrials(ctx, onlyNew = false) {
         contactEmail: t.contactEmail || '',
         contactAddress: t.contactAddress || '',
         source: t.source || '',
-        isNew: t.isNew ? '🆕' : '',
+        star: t.isNew ? '★' : '',
+        firstSeen: t.first_seen || '',
+        windowState: t.archived ? '已归档' : (t.inWindow === false ? '已过窗口' : '窗口内'),
         _sponsorCount: api.sponsorCount,
         _trialCount: api.trialCount,
         _apis: [{ cn: api.name_cn || api.name_en, cat: api.potency_category }]
@@ -117,6 +126,9 @@ function flattenTrials(ctx, onlyNew = false) {
     cur._sponsorCount = Math.max(cur._sponsorCount, r._sponsorCount);
     cur._trialCount = Math.max(cur._trialCount, r._trialCount);
     if (r.drugName.length > cur.drugName.length) cur.drugName = r.drugName;
+    if (r.star) cur.star = '★';
+    if (r.firstSeen && (!cur.firstSeen || r.firstSeen < cur.firstSeen)) cur.firstSeen = r.firstSeen;
+    if (cur.windowState !== '窗口内' && r.windowState === '窗口内') cur.windowState = '窗口内';
     if (!cur.regClass && r.regClass) cur.regClass = r.regClass;
     if (!cur.iec && r.iec) cur.iec = r.iec;
     if (!cur.nmpaSrc && r.nmpaSrc) cur.nmpaSrc = r.nmpaSrc;
@@ -177,7 +189,20 @@ function writeTrialSheet(wb, name, rows, cols) {
   styleHeader(ws, cols);
   rows.forEach(r => {
     const row = ws.addRow(r);
-    row.getCell('cat').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: CAT_COLORS[r.catNum] || 'FFFFFFFF' } };
+    const isNew = r.star === '★';
+    if (isNew) {
+      // 本次新增：整行浅绿底（盖过 Cat 底色——"新增"是更紧迫的信号；下一批次自动恢复常规配色）
+      row.eachCell({ includeEmpty: true }, c => {
+        c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NEW_ROW_FILL } };
+      });
+      const star = row.getCell('star');
+      star.font = { bold: true, color: { argb: 'FFC00000' } };
+      star.alignment = { horizontal: 'center', vertical: 'top' };
+    } else {
+      row.getCell('cat').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: CAT_COLORS[r.catNum] || 'FFFFFFFF' } };
+      const star = row.getCell('star');
+      star.alignment = { horizontal: 'center', vertical: 'top' };
+    }
     if (r.osd) row.getCell('dosageForm').font = { bold: true };
     row.alignment = { vertical: 'top', wrapText: false };
   });
@@ -186,17 +211,43 @@ function writeTrialSheet(wb, name, rows, cols) {
 
 function fmtPct(n, d) { return d ? (n / d * 100).toFixed(1) + '%' : '0%'; }
 
+// 最近一次运行批次（来自沉淀账本）
+function latestRunLabel() {
+  try {
+    const runs = require('./history').loadRuns().runs || [];
+    const last = runs.slice(-1)[0];
+    return last ? `${last.run}（新增 ${last.new} 条 / 当时商机 ${last.total} 条）` : '（尚无批次记录）';
+  } catch (_) { return '（尚无批次记录）'; }
+}
+
 // ── Sheet 1: 概览 ──
-function buildOverviewSheet(wb, ctx, rows, isFull) {
+function buildOverviewSheet(wb, ctx, rows, isFull, allRows) {
+  const totalRows = allRows || rows;   // 累积全量（含历史沉淀行）
   const ws = wb.addWorksheet('概览');
   ws.columns = [{ width: 34 }, { width: 92 }];
   const title = (t) => { const r = ws.addRow([t, '']); r.font = { bold: true, size: 13 }; };
   const kv = (k, v) => ws.addRow([k, v]);
 
+  const newCount = totalRows.filter(r => r.star === '★').length;
+  const histCount = totalRows.filter(r => r.windowState !== '窗口内').length;
   title(ctx.config.title);
   ws.addRow(['生成日期', ctx.today]);
   ws.addRow(['数据来源', String(ctx.config.source_label).replace('{version}', ctx.snap.fda_data[ctx.config.cache_version_field] || '')]);
-  ws.addRow(['本次模式', isFull ? '全量（含全部商机）' : '增量（仅含本次新增商机）']);
+  ws.addRow(['交付视图', '累积（全量沉淀 + 本次新增高亮）—— 数据随每次运行累加，不随本次增量删减']);
+  const runRow = ws.addRow(['本批次时间', latestRunLabel()]);
+  runRow.font = { bold: true };
+  const newRow = ws.addRow(['★ 本次新增', `${newCount} 条（浅绿底 + ★ 列，可用首行筛选快速查看）`]);
+  newRow.getCell(2).font = { bold: true, color: { argb: 'FFC00000' } };
+  ws.addRow(['累计商机', `${totalRows.length} 行（本表统计口径 = 窗口内活跃 ${rows.length} 行 + 历史沉淀 ${histCount} 行）`]);
+  ws.addRow(['历史沉淀位置', '已过窗口 / 已归档的行只在「全部商机」Sheet（P1/P2 只放窗口内活跃商机，避免稀释工作清单）']);
+  ws.addRow([]);
+
+  title('图例（怎么看这张表）');
+  kv('★ 本次新增', '相对上一次运行新发现的商机；整行浅绿底，下一批次自动恢复常规配色');
+  kv('首次发现', '这条商机历史上第一次被发现的批次日期（不随重扫/缓存重置而改变）');
+  kv('窗口状态', `窗口内 = 在 ${ctx.config.lookback_years || 2} 年时间窗内（P1/P2 只放窗口内）；已过窗口 / 已归档 = 历史沉淀行（仅在「全部商机」）`);
+  kv('批次历史', '每次运行的 时间 / 新增 / 累计 —— 见「批次历史」Sheet');
+  kv('★ 与「首次发现」不一致时', '正常：★ 是"相对上一次运行"的新增（某条商机中途消失又出现也会再标 ★）；首次发现是"历史上第一次见到"，不会被重扫重置');
   ws.addRow([]);
 
   title('总览');
@@ -292,9 +343,11 @@ function buildApiSheet(wb, ctx, isFull) {
     { key: 'aiLimit', header: 'AI Limit', width: 12 },
     { key: 'dosageGroup', header: '剂型组', width: 14 },
     { key: 'formDist', header: '剂型分布', width: 44 },
-    { key: 'trialCount', header: isFull ? '试验数' : '新增数', width: 8 },
+    { key: 'trialCount', header: '试验数', width: 8 },
+    { key: 'newCount', header: '本次新增', width: 9 },
+    { key: 'histCount', header: '历史行数', width: 9 },
     { key: 'sponsorCount', header: '企业数', width: 8 },
-    { key: 'oralSolidCount', header: isFull ? 'OSD条数' : 'OSD新增数', width: 9 },
+    { key: 'oralSolidCount', header: 'OSD条数', width: 9 },
     { key: 'classDist', header: '药物分类分布', width: 32 },
     { key: 'csp', header: '推荐CSP方案', width: 34 },
     { key: 'confirm', header: '待确认', width: 18 }
@@ -302,7 +355,7 @@ function buildApiSheet(wb, ctx, isFull) {
   const ws = wb.addWorksheet('按API汇总');
   styleHeader(ws, cols);
   const apis = Object.values(ctx.enrichedApis)
-    .filter(a => isFull || a.newTrialCount > 0)
+    .filter(a => a.trialCount > 0 || (a.historyTrials || []).length > 0)
     .sort((a, b) => a.potency_category - b.potency_category
       || b.oralSolidCount - a.oralSolidCount
       || b.sponsorCount - a.sponsorCount);
@@ -317,45 +370,112 @@ function buildApiSheet(wb, ctx, isFull) {
       aiLimit: a.ai_limit,
       dosageGroup: a.dosageGroup,
       formDist,
-      trialCount: isFull ? a.trialCount : a.newTrialCount,
+      trialCount: a.trialCount,
+      newCount: a.newTrialCount,
+      histCount: (a.historyTrials || []).length,
       sponsorCount: a.sponsorCount,
-      oralSolidCount: isFull ? a.oralSolidCount : oralNew,
+      oralSolidCount: a.oralSolidCount,
       classDist,
       csp: a.csp_recommendation || '',
       confirm: a.csp_confirm || ''
     });
-    row.getCell('catNum').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: CAT_COLORS[a.potency_category] || 'FFFFFFFF' } };
+    const hasNew = a.newTrialCount > 0;
+    if (hasNew) {
+      row.eachCell({ includeEmpty: true }, c => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NEW_ROW_FILL } }; });
+      const n = row.getCell('newCount');
+      n.font = { bold: true, color: { argb: 'FFC00000' } };
+    } else {
+      row.getCell('catNum').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: CAT_COLORS[a.potency_category] || 'FFFFFFFF' } };
+    }
     if (row.getCell('oralSolidCount').value > 0) row.getCell('oralSolidCount').font = { bold: true };
   });
   return ws;
 }
 
 // ── 主入口 ──
+// 累积视图：每次都出全量 + 本次新增高亮（★ + 浅绿底）；P1/P2 仅窗口内活跃商机
 function generateWorkbook(snapshot, scenario, isFull) {
   const ctx = buildLeadModel(snapshot, scenario, isFull);
-  // 增量模式：只导出本次新增（与 Markdown 报告规则一致）
-  const rows = flattenTrials(ctx, !isFull);
-  const suffix = isFull ? '' : '新增-';
+  const activeRows = flattenTrials(ctx, 'active');    // 窗口内 → P1/P2
+  const allRows = flattenTrials(ctx, 'all');          // 累积全量 → 全部商机
+  const newRows = allRows.filter(r => r.star === '★').length;
 
   const wb = new ExcelJS.Workbook();
   wb.creator = 'pi_csp_agent';
   wb.created = new Date();
 
-  buildOverviewSheet(wb, ctx, rows, isFull);
-  writeTrialSheet(wb, `P1-${suffix}口服固体`, rows.filter(r => r.osd), HEADERS);
-  writeTrialSheet(wb, `P2-${suffix}其他剂型`, rows.filter(r => !r.osd), HEADERS);
-  writeTrialSheet(wb, `全部商机`, rows, HEADERS);
+  buildOverviewSheet(wb, ctx, activeRows, isFull, allRows);
+  writeTrialSheet(wb, 'P1-口服固体', activeRows.filter(r => r.osd), HEADERS);
+  writeTrialSheet(wb, 'P2-其他剂型', activeRows.filter(r => !r.osd), HEADERS);
+  writeTrialSheet(wb, '全部商机', allRows, HEADERS);
   buildApiSheet(wb, ctx, isFull);
+  buildBatchSheet(wb);
 
   const xlsxPath = path.join(WS, ctx.config.report_xlsx || 'output/CSP_Leads_Report.xlsx');
 
   fs.mkdirSync(path.dirname(xlsxPath), { recursive: true });
   return wb.xlsx.writeFile(xlsxPath).then(() => ({
     xlsxPath,
-    rows: rows.length,
-    p1: rows.filter(r => r.osd).length,
-    p2: rows.filter(r => !r.osd).length
+    rows: allRows.length,
+    p1: activeRows.filter(r => r.osd).length,
+    p2: activeRows.filter(r => !r.osd).length,
+    newRows
   }));
+}
+
+// ── Sheet 6: 批次历史（每次运行的沉淀过程）──
+function buildBatchSheet(wb) {
+  const cols = [
+    { key: 'run', header: '运行批次（本地时间）', width: 22 },
+    { key: 'date', header: '日期', width: 12 },
+    { key: 'new', header: '本次新增', width: 10 },
+    { key: 'total', header: '当时商机总数', width: 12 },
+    { key: 'cumulative', header: '账本累计', width: 10 },
+    { key: 'archived', header: '归档行', width: 9 },
+    { key: 'ctgov', header: 'CT.gov 条', width: 10 },
+    { key: 'cdt', header: 'CDT 条', width: 9 },
+    { key: 'cdeProducts', header: 'CDE已查品种', width: 11 },
+    { key: 'cdeSignals', header: 'CDE有分类信号', width: 12 }
+  ];
+  const ws = wb.addWorksheet('批次历史');
+  styleHeader(ws, cols);
+  let runs = [];
+  try { runs = require('./history').loadRuns().runs || []; } catch (_) {}
+  // 账本累计：用历史账本按 first_seen 统计（比 runs 记录更可靠）
+  let ledgerByBatch = {};
+  try {
+    Object.values(require('./history').loadLedger().entries || {}).forEach(e => {
+      ledgerByBatch[e.first_seen] = (ledgerByBatch[e.first_seen] || 0) + 1;
+    });
+  } catch (_) {}
+  let cumulative = 0;
+  runs.slice(-100).forEach(r => {
+    const e = r.enrich || {};
+    const row = ws.addRow({
+      run: r.run, date: r.date, new: r.new, total: r.total, cumulative: '',
+      archived: r.archived || 0,
+      ctgov: (r.sources || {})['CT.gov'] || 0,
+      cdt: (r.sources || {})['CDT'] || 0,
+      cdeProducts: e.cde_products || 0,
+      cdeSignals: e.cde_signals || 0
+    });
+    if ((r.new || 0) > 0) {
+      const n = row.getCell('new');
+      n.font = { bold: true, color: { argb: 'FFC00000' } };
+    }
+  });
+  // 账本批次汇总（无 runs 记录时的兜底视图）
+  const batches = Object.entries(ledgerByBatch).sort();
+  if (batches.length) {
+    ws.addRow([]);
+    const t = ws.addRow(['沉淀账本按首次发现批次统计', '', '', '', '', '', '', '', '', '']);
+    t.font = { bold: true };
+    Object.entries(ledgerByBatch).sort().forEach(([d, n]) => {
+      cumulative += n;
+      ws.addRow([d, d, n, '', cumulative, '', '', '', '', '']);
+    });
+  }
+  return ws;
 }
 
 module.exports = { generateWorkbook, flattenTrials };

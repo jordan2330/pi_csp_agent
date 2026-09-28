@@ -73,37 +73,6 @@ function escapeCell(s) {
   return String(s).replace(/\|/g, '\|').replace(/\r?\n/g, ' ');
 }
 
-function renderCell(col, t) {
-  if (col.key === 'contact') return escapeCell(formatContact(t));
-  if (col.key === 'dosageForm') return formBadge(t.dosageForm);
-  if (col.key === 'isNew') return t.isNew ? '🆕' : '';
-  let v = t[col.key];
-  // Truncate indication and phase (user requirement)
-  if (col.fmt && col.fmt.startsWith('truncate')) {
-    return escapeCell(truncate(v, parseInt(col.fmt.slice(8), 10)));
-  }
-  return escapeCell((v === undefined || v === null || v === '') ? '-' : String(v));
-}
-
-function renderTable(columns, trials) {
-  let t = '';
-  t += '| ' + columns.map(c => c.header).join(' | ') + ' |\n';
-  t += '|' + columns.map(c => '-'.repeat(Math.max((c.header || '').length, 3))).join('|') + '|\n';
-  for (const tr of trials) {
-    t += '| ' + columns.map(c => renderCell(c, tr)).join(' | ') + ' |\n';
-  }
-  return t;
-}
-
-function heading(api, tpl, config) {
-  return tpl
-    .replace('{name_cn}', api.name_cn)
-    .replace('{name_en}', api.name_en)
-    .replace('{sponsorCount}', api.sponsorCount)
-    .replace('{trialCount}', api.trialCount);
-}
-
-// ── 构建报表数据模型（Markdown / Excel 渲染器共用）──
 function buildLeadModel(snapshot, scenario, isFull) {
   const { config, hooks } = scenario;
   const today = new Date().toISOString().slice(0, 10);
@@ -138,22 +107,30 @@ function buildLeadModel(snapshot, scenario, isFull) {
   const windowStart = new Date(todayDate);
   windowStart.setFullYear(todayDate.getFullYear() - (Number(config.lookback_years) || 2));
 
-  const filteredResults = {};
+  // 窗口切分：窗口内 → P1/P2/统计；窗口外或归档行 → 仅「全部商机」（历史沉淀）
+  const filteredResults = {}, historyResults = {};
   Object.entries(results).forEach(([apiName, trials]) => {
-    filteredResults[apiName] = (trials || []).filter(t => {
+    const inWin = [], hist = [];
+    (trials || []).forEach(t => {
       const regDate = parseDate(t.regDate);
-      return !regDate || regDate >= windowStart;
+      const ok = !t.archived && (!regDate || regDate >= windowStart);
+      t.inWindow = ok;
+      (ok ? inWin : hist).push(t);
     });
+    filteredResults[apiName] = inWin;
+    historyResults[apiName] = hist;
   });
   const apisWithLeads = Object.keys(filteredResults).filter(k => (filteredResults[k] || []).length > 0);
+  // 渲染集合 = 有窗口内商机的 API ∪ 只有历史行的 API（历史行只进「全部商机」）
+  const apisToRender = [...new Set([...apisWithLeads, ...Object.keys(historyResults).filter(k => (historyResults[k] || []).length > 0)])];
 
   // ── Enrich + aggregate ──
   const enrichedApis = {};
   let totalLeads = 0;
   let totalNewLeads = 0;
 
-  apisWithLeads.forEach(apiName => {
-    const rawTrials = (filteredResults[apiName] || []).map(t => {
+  apisToRender.forEach(apiName => {
+    const rawTrials = [...(filteredResults[apiName] || []), ...(historyResults[apiName] || [])].map(t => {
       const dosageForm = resolveDosageForm(t);
       const nmpa = (() => {
         if (!nm) return null;
@@ -208,8 +185,11 @@ function buildLeadModel(snapshot, scenario, isFull) {
     });
 
     // Enterprise filter: CDT trials are all pharma companies; CT.gov needs filtering
-    const trials = rawTrials.filter(t => t.source === 'CDT' || isEnterprise(t.sponsor));
-    if (trials.length === 0) return; // Skip API if no enterprise trials remain
+    const kept = rawTrials.filter(t => t.source === 'CDT' || isEnterprise(t.sponsor));
+    // 活跃（窗口内）用于 P1/P2 与统计；historyTrials 只进「全部商机」（历史沉淀）
+    const trials = kept.filter(t => t.inWindow !== false);
+    const historyTrials = kept.filter(t => t.inWindow === false);
+    if (trials.length === 0 && historyTrials.length === 0) return;
 
     const info = apiInfo[apiName] || { name_cn: apiTranslations[apiName] || apiName, potency_category: 5, ai_limit: '1500 ng/day' };
     const newTrials = trials.filter(t => t.isNew);
@@ -247,6 +227,7 @@ function buildLeadModel(snapshot, scenario, isFull) {
       groupCounts,
       classificationCounts,
       trials,
+      historyTrials,                 // 窗口外 / 已归档（仅「全部商机」渲染）
       cdtTrials,
       ctgovTrials,
       newTrials,
@@ -261,7 +242,7 @@ function buildLeadModel(snapshot, scenario, isFull) {
 
   // ── 场景级分类一致性修正（可选 hook）：同一产品跨试验/跨企业统一口径 ──
   if (hooks.refineClassifications) {
-    try { hooks.refineClassifications(Object.values(enrichedApis).flatMap(a => a.trials)); }
+    try { hooks.refineClassifications(Object.values(enrichedApis).flatMap(a => [...a.trials, ...(a.historyTrials || [])])); }
     catch (e) { console.error('分类一致性修正失败:', e.message); }
   }
 
@@ -270,7 +251,7 @@ function buildLeadModel(snapshot, scenario, isFull) {
   //   规则（证据不适用） = 该品种有证据，但因原研企业/代码号/改良型名称被排除
   //   规则推断 = 无可用证据
   for (const api of Object.values(enrichedApis)) {
-    for (const t of api.trials) {
+    for (const t of [...api.trials, ...(api.historyTrials || [])]) {
       const n = t.nmpa;
       const cls = t.drugClassification || '未分类';
       if (!n) { t.classBasis = '规则推断'; continue; }
@@ -317,76 +298,4 @@ function buildLeadModel(snapshot, scenario, isFull) {
 }
 
 // ── Markdown 渲染 ──
-function generateReport(snapshot, scenario, isFull) {
-  const { config, hooks } = scenario;
-  const ctx = buildLeadModel(snapshot, scenario, isFull);
-  const { totalLeads, totalNewLeads, apisWithLeadsCount, byCat, newLeadApis, today } = ctx;
-
-  // ── Render Markdown ──
-  let md = '';
-  md += '# ' + config.title + '\n';
-  const sourceLabel = config.source_label.replace('{version}', snapshot.fda_data[config.cache_version_field] || 'unknown');
-  md += `> 生成日期: ${today} | 数据来源: ${sourceLabel}\n`;
-  md += `> 本次新增: ${totalNewLeads} 条 | 总计: ${totalLeads} 条\n\n`;
-
-  // Overview (scenario-specific)
-  if (hooks.renderOverview) {
-    md += hooks.renderOverview(ctx);
-  }
-
-  // New leads section
-  if (newLeadApis.length > 0) {
-    md += '## ' + config.headings.new_leads_section + '\n\n';
-    newLeadApis.forEach(api => {
-      md += '### ' + heading(api, config.headings.new_lead_api, config) + '\n';
-      md += hooks.newLeadSubtitle(api, config) + '\n\n';
-      md += renderTable(config.tables.new_leads.columns, sortTrialsCDTFirst(api.newTrials));
-      md += '\n';
-    });
-  }
-
-  // Full leads section: only in full mode (增量模式只输出新增商机，避免报告过大)
-  if (isFull) {
-    md += '## ' + config.headings.full_leads_section + '\n\n';
-    config.category.order.filter(c => (byCat[c] || []).length > 0).forEach(cat => {
-      md += hooks.categoryHeader(cat, config) + '\n\n';
-      byCat[cat].forEach(api => {
-        md += '#### ' + heading(api, config.headings.full_lead_api, config) + '\n';
-        md += hooks.fullLeadSubtitle(api, config) + '\n\n';
-        md += renderTable(config.tables.full_leads.columns, sortTrialsCDTFirst(api.trials));
-        md += '\n';
-      });
-    });
-  }
-
-  // ── Write report ──
-  const outputPath = path.join(WS, config.report_file);
-  fs.writeFileSync(outputPath, md, 'utf8');
-  return { outputPath, totalLeads, totalNewLeads, apisWithLeadsCount };
-}
-
-// ── Standalone (verification harness) ──
-if (require.main === module) {
-  const scenarioName = process.argv[2] || 'nitrosamine';
-  const scenarioDir = path.join(WS, 'scenarios', scenarioName);
-  const config = JSON.parse(fs.readFileSync(path.join(scenarioDir, 'scenario.json'), 'utf8'));
-  const hooks = require(path.join(scenarioDir, 'enrich.js'));
-  const todayStr = new Date().toISOString().slice(0, 10);
-  const snapFile = path.join(WS, 'output/runs', todayStr + '.json');
-  if (!fs.existsSync(snapFile)) {
-    console.error('Snapshot not found:', snapFile);
-    process.exit(1);
-  }
-  const snap = JSON.parse(fs.readFileSync(snapFile, 'utf8'));
-  // Read search mode to determine isFull
-  let isFull = false;
-  try {
-    const searchConfig = JSON.parse(fs.readFileSync(path.join(WS, 'config/search-config.json'), 'utf8'));
-    isFull = searchConfig.search_mode === 'full';
-  } catch (_) {}
-  const r = generateReport(snap, { config, hooks }, isFull);
-  console.log('Report written:', r.outputPath);
-  console.log(`Stats: ${r.totalLeads} leads, ${r.totalNewLeads} new, ${r.apisWithLeadsCount} APIs with leads`);
-}
-
-module.exports = { generateReport, buildLeadModel };
+module.exports = { buildLeadModel };
