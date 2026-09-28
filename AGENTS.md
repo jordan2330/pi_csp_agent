@@ -35,7 +35,7 @@ This is a Pi Coding Agent project for CSP (Aptar active packaging) sales lead di
   - `lib/report-xlsx.js` — 通用 Excel 渲染器（6 sheet：概览 / P1-口服固体 / P2-其他剂型 / 全部商机 / 按API汇总 / 批次历史）
   - `lib/history.js` — 商机沉淀账本（首次发现/最近出现 + 运行批次档案 + 归档行合并）
   - `lib/cde-classify.js` — **法规分类富化（主数据源）**：CDE 官方受理品种信息 → 注册分类 1/2/3/4/5.2类（免费、一手；真实浏览器 DOM 提取）
-  - `lib/nmpa-search.js` — 法规分类富化（兜底）：博查搜索抽取注册分类/一致性评价证据（品种名门控 + 归属判定 + 缓存/预算）
+  - `lib/nmpa-search.js` — 博查搜索富化（**已停用**，二手搜索不参与分类；模块与缓存保留备查）
 - `prompts/` — Pi prompt templates (entry points like `/lead-scan`)
 - `config/` — Cached data and model configuration
   - `models.json` — LLM 模型配置
@@ -60,7 +60,7 @@ This is a Pi Coding Agent project for CSP (Aptar active packaging) sales lead di
 - FDA data is auto-refreshed each run (page updated quarterly by FDA)
 - 本地运行（WSL Ubuntu 22），不使用容器；仓库根目录即工作目录，脚本路径一律用 `__dirname` 推导或相对路径，禁止硬编码绝对路径
 - 浏览器采集依赖 Windows 侧真实 Chrome：由 `scripts/launch-chrome.sh` 启动专用 profile（CDP 端口 9223），WSL 需 mirrored 网络模式（`.wslconfig`: `networkingMode=mirrored`）；`BROWSER_ENDPOINT` 可覆盖默认端点
-- 法规分类富化（Phase 2c）需 `BOCHA_API_KEY`（或 `~/.pi/web-search.json` 的 bochaApiKey）；预算与开关见 `config/nmpa-search.json`
+- 法规分类富化（Phase 2c）主源为 CDE、无需 Key（博查已停用）；如需重启博查需 `BOCHA_API_KEY`（或 `~/.pi/web-search.json` 的 bochaApiKey）；预算与开关见 `config/nmpa-search.json`
 - 药物分类优先级：**CDE 官方受理数据 > 博查搜索证据 > 规则推断 > 组内统一**；证据缺失时不改判
 - **第三方商业数据源合规红线**：医药魔方 PharmaGO/TrialiCube《用户服务协议》第 2.4 条**明令禁止一切自动化访问**（违反者封号且不退费）→ **禁止**对 pharmcube 系站点写爬虫；只用其人工导出结果做交叉校验，且不长期囤积成自有数据库。CDE/CT.gov 等政府公开数据源无此限制
 - CDT 检索必须用**药物名称精确匹配**（`drugs_name` + `drugs_type=2`，二级查询）；禁止用 `keywords` 全文检索——它会把"正文提及"当成"有效成分"（搜他莫昔芬返回阿贝西利片/依西美坦片）
@@ -81,6 +81,7 @@ This is a Pi Coding Agent project for CSP (Aptar active packaging) sales lead di
 ## Report Output Rules
 
 - **交付物只有 Excel**（`output/CSP_Leads_Report.xlsx`）。Markdown 报告已移除（v4.1.0 起）——它的内容与 Excel 重复，且每轮 16 万字符对 pi 摘要无价值。
+- **分类只留实锤（v4.2.0 起）**：`药物分类`/`注册分类`/`分类依据` **只来自 CDE 官方受理记录**，未取得证据**留空、不推断**；`分类依据` 只有 `CDE 受理数据（产品级）`/`CDE 受理数据（品种级）` 两个取值。禁止恢复任何规则推断（BE→仿制药、缓释/复方→改良型、期次→新药…），禁止在 `flattenTrials` 里给空值兜底（`|| '未分类'`、`|| '规则推断'`）。已删除列：一致性评价、证据来源；观察性试验的信息放在「分期」列
 - **Excel 一律是「累积视图」**（v4.1.0 起，取代旧的"增量模式只出新增"规则）：
   - 每次都输出**全量沉淀**（上限外的历史行也在「全部商机」Sheet），本次新增用 **★ 列 + 整行浅绿底** 醒目标识
   - `★ 本次新增` = 相对**上一次运行**的新增**且在时间窗内**（P1+P2+全部商机 三处 ★ 行数必须相等）；**首次发现** = 历史上第一次见到（沉淀账本，不随重扫重置）——两者不一致是正常的；★ 口径唯一权威在 `report-xlsx.js`

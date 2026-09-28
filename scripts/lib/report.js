@@ -172,46 +172,39 @@ function buildLeadModel(snapshot, scenario, isFull) {
           ...(pf.signal === 'innovative' ? { innovative: true } : {}),
           ...(pf.signal === 'originator' ? { originator: true } : {})
         });
-        const pick = (cache, source) => {
+        // 只用 CDE 官方证据（v4.2.0：博查二手搜索不再参与分类，模块/缓存保留备查）
+        const pick = (cache) => {
           const cands = [cache.products[drugCore], (belongs && cnCore) ? cache.products[cnCore] : null];
-          const e = cands.find(x => x && x.confidence !== 'none');
-          return e ? { entry: e, source } : null;
+          return cands.find(x => x && x.confidence !== 'none') || null;
         };
-        const cdeHit = pick(cdeCache, 'cde');
-        const bochaHit = pick(nmpaCache, 'bocha');
-        if (!cdeHit && !bochaHit) return null;
+        const cdeHit = pick(cdeCache);
+        if (!cdeHit) return null;
+        const bochaHit = null;
 
         // 标签来源与"一致性评价"分开处理（v4.1.3）：
         //   标签/注册分类：产品级 CDE > 品种级 CDE > 博查（**不混用**，否则博查的品种级"过评"
         //    会把产品级 2.x 改良型新药又拉回"仿制药"）
         //   一致性评价列：产品级/品种级 CDE 或 博查 有其一即标注（列语义 = 该品种已有过评仿制）
         let facts = null, level = 'api', hitProduct = '';
-        if (cdeHit) {
-          const pm = matchProduct(cdeHit.entry, t.drugName);
+        {
+          const pm = matchProduct(cdeHit, t.drugName);
           if (pm && pm.pf && pm.pf.signal) { facts = factsFromProduct(pm.pf); level = 'product'; hitProduct = pm.name; }
-          else { facts = cdeHit.entry.facts || {}; }
+          else { facts = cdeHit.facts || {}; }
         }
         const bochaFacts = (bochaHit && bochaHit.entry.facts) || {};
-        const cdeFacts = (cdeHit && cdeHit.entry.facts) || {};
+        const cdeFacts = cdeHit.facts || {};
         const uProd = level === 'product' ? nm.labelFromFacts(facts) : null;
-        const uCde = cdeHit ? nm.labelFromFacts(cdeFacts) : null;
-        const uBocha = bochaHit ? nm.labelFromFacts(bochaFacts) : null;
-        const chosen = (uProd && uProd.label) ? { u: uProd, src: 'cde', lvl: 'product' }
-          : (uCde && uCde.label) ? { u: uCde, src: 'cde', lvl: 'api' }
-            : (uBocha && uBocha.label) ? { u: uBocha, src: 'bocha', lvl: 'api' } : null;
+        const uCde = nm.labelFromFacts(cdeFacts);
+        const chosen = (uProd && uProd.label) ? { u: uProd, lvl: 'product' } : (uCde.label ? { u: uCde, lvl: 'api' } : null);
         const u = chosen ? chosen.u : { label: null, regClass: '', kind: 'none' };
         if (chosen) level = chosen.lvl;
-        const iecPassed = !!(facts && facts.iec) || !!(cdeFacts.iec) || !!(bochaFacts.iec) || !!(facts && facts.aiIec);
-        const entry = (cdeHit || bochaHit).entry;
+        const entry = cdeHit;
         return {
           regClass: u.regClass || '', label: u.label || '', level, product: hitProduct,
-          labelSrc: chosen ? chosen.src : '',
-          iec: iecPassed ? '通过/视同通过' : '',
-          generic: u.kind === 'generic', innovative: u.kind === 'innovative', improved: u.kind === 'improved',
+          kind: u.kind,
           confidence: entry.confidence,
-          source: cdeHit ? (bochaHit ? 'cde+bocha' : 'cde') : 'bocha',
-          note: [entry.note || '', hitProduct ? `产品级命中 ${hitProduct}` : '', (bochaFacts.iec && !cdeFacts.iec && !(facts && facts.iec)) ? '过评证据来自博查' : ''].filter(Boolean).join(' / '),
-          url: ((chosen && chosen.src === 'bocha') ? (bochaHit ? bochaHit.entry.sources : []) : (cdeHit ? cdeHit.entry.sources : bochaHit.entry.sources) || [])[0] || '',
+          note: [entry.note || '', hitProduct ? `产品级命中 ${hitProduct}` : ''].filter(Boolean).join(' / '),
+          url: (entry.sources || [])[0] || '',
           evidence: ((entry.evidence || [])[0] || {}).text || ''
         };
       })();
@@ -222,7 +215,8 @@ function buildLeadModel(snapshot, scenario, isFull) {
         dosageForm,
         dosageGroup: dosageFormGroup(dosageForm, config),
         indication: t.indication || (t.source === 'CDT' ? t.briefTitle : (t.condition || t.briefTitle)) || '',
-        phase: t.phase || ''
+        // 分期列承载试验设计事实：观察性试验（注册平台 trialType=OBSERVATIONAL）显式标注
+        phase: t.phase || (/OBSERVATIONAL/i.test(t.trialType || '') ? '观察性（非干预）' : '')
       };
     });
 
@@ -252,7 +246,7 @@ function buildLeadModel(snapshot, scenario, isFull) {
 
     // 药物分类分布
     const classificationCounts = {};
-    trials.forEach(t => { const c = t.drugClassification || '未分类'; classificationCounts[c] = (classificationCounts[c] || 0) + 1; });
+    trials.forEach(t => { const c = t.drugClassification || '未取得证据'; classificationCounts[c] = (classificationCounts[c] || 0) + 1; });
 
     // CSP 推荐：以剂型为主（返回 {text, confirm}）
     const partialApi = { potency_category: info.potency_category, dosageGroup: primaryGroup };
@@ -296,11 +290,13 @@ function buildLeadModel(snapshot, scenario, isFull) {
     for (const t of [...api.trials, ...(api.historyTrials || [])]) {
       const n = t.nmpa;
       const cls = t.drugClassification || '未分类';
-      if (!n) { t.classBasis = '规则推断'; continue; }
+      if (!n) { t.classBasis = ''; continue; }
       const byEv = n.label || null;      // 与注册分类同源（labelFromFacts）
-      t.classBasis = (byEv && cls === byEv)
-        ? (n.labelSrc === 'cde' ? '官方证据(CDE)' : (n.labelSrc === 'bocha' ? '搜索证据' : '规则（证据不适用）'))
-        : '规则（证据不适用）';
+      // 分类依据 = 证据出处（只留实锤；无实锤/证据不适用则留空，不做推断）
+      const applicable = !!(byEv && cls === byEv);
+      t.classBasis = applicable ? (n.level === 'product' ? 'CDE 受理数据（产品级）' : 'CDE 受理数据（品种级）') : '';
+      // 证据不适用（原研企业/代码号 → 品种级证据被跳过）时，注册分类也必须一并留空，避免"有分类无标签"
+      if (!applicable) t.nmpa = { ...n, regClass: '' };
     }
   }
 

@@ -55,41 +55,17 @@ function parseCnPhase(phase) {
 // ── Drug classification inference（规则基于真实 phase/trialType 取值）──
 //   CDT: phase="其它 其他说明:生物等效性试验" | "I期/II期/III期"（trialType 含 生物等效/药代动力学/安全性和有效性）
 //   CT.gov: phase="PHASE1/2/3/4" | "NA" | ""（trialType: INTERVENTIONAL / OBSERVATIONAL）
-function classifyTrial(trial) {
-  const phase = trial.phase || '';
-  const trialType = trial.trialType || '';
-  const sponsor = trial.sponsor || '';
-  const drugName = trial.drugName || '';
-  const title = `${trial.briefTitle || ''} ${trial.officialTitle || ''}`;
-  const isOriginator = isOriginatorCompany(sponsor);
-
-  // ── 仿制药：BE / 生物利用度 / 一致性评价 ──
-  if (/生物等效|生物利用度|一致性评价|\bBE\b/i.test(trialType)) return '仿制药';
-  if (/生物等效|一致性评价|bioequivalen/i.test(title)) return '仿制药';
-  if (/生物等效|\bBE\b|其他-BE/.test(phase)) return '仿制药';
-
-  // ── 观察性研究：非干预性，通常不是包装变更线索（显式标注，不留空） ──
-  if (/OBSERVATIONAL/i.test(trialType)) return '观察性研究';
-
-  // ── 改良型新药：剂型/复方改良特征 ──
-  if (/缓释|控释|肠溶|迟释|缓控释|复方|口崩|分散片|咀嚼|双层|速释/.test(drugName)) return '新药（改良型）';
-
-  const cn = parseCnPhase(phase);
-  const isLatePhase = /PHASE\s?(2|3|4)/.test(phase.toUpperCase()) || !!(cn && cn.late);
-  const isAnyPhase = /PHASE\s?(1|2|3|4)/.test(phase.toUpperCase()) || !!cn;
-
-  // ── 原研药：原研企业 + 中后期临床 ──
-  if (isOriginator && isLatePhase) return '原研药';
-
-  // ── 新药：干预性 I–III 期（非原研企业） ──
-  if (isAnyPhase) return isOriginator ? '原研药' : '新药';
-
-  // ── 其余（干预性但无分期 / 数据缺失）- 显式标为未分类 ──
-  return '未分类';
+/**
+ * 药物分类（**只留实锤，不做推断**，v4.2.0）
+ *
+ * 设计原则：宁可留空让销售人工核对，也不要推断标签。
+ *   - 只做"事实搬运"：注册平台明确标 OBSERVATIONAL 的试验 → 标为观察性（注册事实，非推断）
+ *   - 其余返回空字符串：真正的药物分类只能来自 CDE 官方受理记录（见 refineClassifications）
+ */
+function classifyTrial() {
+  return '';   // 药物分类列只放 CDE 实锤证据（见 refineClassifications）；观察性等试验设计信息放在「分期」列
 }
 
-// ── CSP 推荐方案：以剂型为主（CSP 选型第一准则是包装形态），风险等级只决定优先级 ──
-// 返回 { text, confirm }：text=候选方案组合；confirm=需销售确认的信息（如“包装形态”）
 function recommendCSP(api, config) {
   const map = config.csp_by_dosage_group || {};
   const entry = map[api.dosageGroup];
@@ -123,141 +99,30 @@ function normalizeProductName(name) {
 // 规则：① 同一产品名只要有一次 BE/一致性评价证据 → 该产品（非原研企业）统一为"仿制药"
 //       ② 非原研企业的 IV 期试验 → "仿制药"（已上市产品，多数为仿制/已获批）
 //       ③ 同一（企业, 产品）组内标签不一致时，按多数票 + 业务优先级统一
+/**
+ * 药物分类应用（**只应用实锤证据**，v4.2.0）
+ *
+ * 证据：CDE 官方受理品种信息（scripts/lib/cde-classify.js），两级：
+ *   level='product' = 试验产品名精确/包含命中某条 CDE 受理记录 → 该产品自己的注册分类（最可靠）
+ *   level='api'     = 只查到"品种"级受理记录（非该产品）
+ *
+ * 不套用品种级证据的例外：原研企业申办、代码号在研新药（CDE 不可能有该产品记录）
+ * 无实锤证据 → 留空（不推断）
+ */
 function refineClassifications(trials) {
-  if (!trials || !trials.length) return;
-
-  // ① 收集"有 BE 证据"的产品名
-  const beProducts = new Set();
-  for (const t of trials) {
-    const beEvidence = t.drugClassification === '仿制药'
-      || /生物等效|一致性评价|生物利用度/.test(`${t.trialType || ''} ${t.briefTitle || ''}`);
-    if (beEvidence) beProducts.add(normalizeProductName(t.drugName));
-  }
-
-  // ①② 逐试验修正
-  for (const t of trials) {
-    if (isOriginatorCompany(t.sponsor)) continue;
-    const key = normalizeProductName(t.drugName);
-    const phase = String(t.phase || '');
-    const isPhase4 = /^(IV|4)期/.test(phase) || /PHASE\s?4/i.test(phase);
-    if (beProducts.has(key) || isPhase4) t.drugClassification = '仿制药';
-  }
-
-  // ③ （企业, 产品）组内统一
-  const PRIORITY = ['仿制药', '新药（改良型）', '新药', '原研药', '观察性研究', '未分类'];
-  const groups = new Map();
-  for (const t of trials) {
-    const g = `${t.sponsor || ''}|${normalizeProductName(t.drugName)}`;
-    if (!groups.has(g)) groups.set(g, []);
-    groups.get(g).push(t);
-  }
-  for (const list of groups.values()) {
-    const counts = {};
-    list.forEach(t => { const c = t.drugClassification || '未分类'; counts[c] = (counts[c] || 0) + 1; });
-    if (Object.keys(counts).length <= 1) continue;
-    const winner = Object.keys(counts).sort((a, b) =>
-      counts[b] - counts[a] || PRIORITY.indexOf(a) - PRIORITY.indexOf(b))[0];
-    list.forEach(t => { t.drugClassification = winner; });
-  }
-
-  // ④ 搜索证据优先（NMPA 注册分类 / 一致性评价 → 权威度高于规则推断）
-  //    t.nmpa 由 scripts/lib/report.js 从 Phase 2c 缓存挂载
-  //    注意粒度：证据是"品种级"（某品种有仿制过评产品），不等于该试验就是仿制 → 需要排除
-  //    代码号新药/改良型（如 TQC3927、JKN2304 这类企业自研吸入制剂）
   const CODE_NAME = /^[A-Za-z][A-Za-z0-9\-]{2,}$|[A-Za-z]{2,}[- ]?\d{2,}/;
-  const IMPROVED_NAME = /缓释|控释|肠溶|迟释|缓控释|复方|口崩|分散片|咀嚼|双层|速释/;
   for (const t of trials) {
     const n = t.nmpa;
-    if (!n) continue;
-    if (isOriginatorCompany(t.sponsor)) continue;        // 原研企业仍按原研口径
+    if (!n || !n.label) { t.drugClassification = ''; continue; }
     const name = String(t.drugName || '').trim();
-    if (CODE_NAME.test(name)) {                          // 代码号 = 在研新药，不套用仿制证据
-      t.drugClassification = IMPROVED_NAME.test(name) ? '新药（改良型）' : '新药';
+    if (n.level === 'api' && (isOriginatorCompany(t.sponsor) || CODE_NAME.test(name))) {
+      if (t.drugClassification !== '观察性研究') t.drugClassification = '';                       // 品种级证据不适用 → 显式留空
       continue;
     }
-    // 顺序要点：**仿制证据优先于名称启发式**——缓释/复方既可能是 2 类改良型，
-    // 也可能是原研缓释/复方产品的 4 类仿制（如盐酸他喷他多缓释片），名称本身分不出来。
-    // 用证据统一推导出的标签（labelFromFacts）——标签与注册分类列同源，不会互相矛盾
-    if (n.label) { t.drugClassification = n.label; continue; }
+    t.drugClassification = n.label;
   }
 }
 
-// ── New leads subtitle (the `> ...` line) ──
-function newLeadSubtitle(api, config) {
-  const labels = config.category.labels;
-  let s = `> FDA风险等级: ${labels[api.potency_category]}(Cat ${api.potency_category}) | AI Limit: ${api.ai_limit} | ${cspPart(api)}`;
-  if (api.oralSolidCount > 0) {
-    s += ` | ⭐口服固体: ${api.oralSolidCount}条`;
-  }
-  return s;
-}
-
-// ── Full leads subtitle (the `> ...` line) ──
-function fullLeadSubtitle(api, config) {
-  let s = `> ${cspPart(api)}`;
-  if (api.cdtSponsors.length > 0) {
-    s += ` | CDT来源企业: ${api.cdtSponsors.length}家（含联系方式）`;
-  }
-  if (api.oralSolidCount > 0) {
-    s += ` | ⭐口服固体: ${api.oralSolidCount}条`;
-  }
-  return s;
-}
-
-// ── Category section header ──
-function categoryHeader(cat, config) {
-  const labels = config.category.labels;
-  // AI limit 分档（与重构前一致）：Cat1/2 → 26.5-100，Cat3 → 400，Cat4/5 → 1500
-  const limitRange = cat <= 2 ? '26.5-100' : cat <= 3 ? '400' : '1500';
-  return `### ${labels[cat]} (Cat ${cat}) — AI Limit: ${limitRange} ng/day`;
-}
-
-// ── Compute dosage form stats ──
-// 输出：OSD（含改良释放）/ 其他剂型 / 未识别 三大类 + 细项
-function computeFormStats(enrichedApis) {
-  const detail = {};
-  let osd = 0, other = 0, unknown = 0;
-  for (const api of Object.values(enrichedApis)) {
-    for (const t of api.trials) {
-      const form = t.dosageForm;
-      if (!form) { unknown++; detail['未识别'] = (detail['未识别'] || 0) + 1; continue; }
-      detail[form] = (detail[form] || 0) + 1;
-      if (/口服固体|改良释放/.test(form)) osd++;
-      else other++;
-    }
-  }
-  return { osd, other, unknown, detail };
-}
-
-// ── Overview section (scenario-specific presentation) ──
-function renderOverview(ctx) {
-  const { snap, config, totalLeads, totalNewLeads, apisWithLeadsCount, newLeadApisCount,
-    byCat, allSponsorsGlobalSize, cdtCount, ctgovCount, cdtWithContact, ctgovWithContact,
-    oralSolidCount, enrichedApis } = ctx;
-  const labels = config.category.labels;
-
-  let md = '## 概览\n\n';
-  md += `- FDA亚硝胺风险API: **${snap.fda_data.total_apis}**个 → 中国有临床试验: **${apisWithLeadsCount}**个\n`;
-  md += `- 新增（本次）: **${totalNewLeads}**条（来自 ${newLeadApisCount} 个API）\n`;
-  const catStats = Object.entries(byCat).filter(([, apis]) => apis.length > 0)
-    .map(([c, apis]) => `${labels[c]}(Cat ${c}): ${apis.length}个API`).join(' | ');
-  md += `- 风险分布: ${catStats}\n`;
-  md += `- 涉及企业/机构: **${allSponsorsGlobalSize}**家\n`;
-  md += `- 数据源分布:\n`;
-  md += `  - CDT ${cdtCount} 条（${cdtWithContact} 条含联系方式）\n`;
-  md += `  - CT.gov ${ctgovCount} 条（${ctgovWithContact} 条含联系方式）\n`;
-  md += `- **剂型分布**（优先级：OSD 优先）:\n`;
-  const fs2 = computeFormStats(enrichedApis);
-  md += `  - ⭐ **口服固体制剂(含改良释放): ${fs2.osd}条 (${(fs2.osd / totalLeads * 100).toFixed(1)}%)**\n`;
-  md += `  - 其他剂型: ${fs2.other}条 (${(fs2.other / totalLeads * 100).toFixed(1)}%)\n`;
-  md += `  - 未识别: ${fs2.unknown}条 (${(fs2.unknown / totalLeads * 100).toFixed(1)}%) — 多为观察性研究（药物仅作背景，无剂型意义）\n`;
-  Object.entries(fs2.detail).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1])
-    .forEach(([form, count]) => { md += `    - ${form}: ${count}条\n`; });
-  md += `\n`;
-  return md;
-}
-
-// ── Snapshot fda_data extras ──
 function snapshotExtras(fda) {
   return {
     api_count_with_nitrosamines: Object.values(fda.apis).filter(a => (a.nitrosamines || []).length > 0).length
@@ -270,9 +135,5 @@ module.exports = {
   normalizeProductName,
   isOriginatorCompany,
   recommendCSP,
-  newLeadSubtitle,
-  fullLeadSubtitle,
-  categoryHeader,
-  renderOverview,
   snapshotExtras
 };

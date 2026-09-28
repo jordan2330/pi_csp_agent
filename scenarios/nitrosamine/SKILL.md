@@ -250,7 +250,7 @@ tail -20 output/runs/pipeline.log
 - 缓存 `config/cde_class_cache.json`（含 `rules_version`）；配置 `config/cde-classify.json`（`enabled` / `cache_ttl_days` / `max_pages_per_product` / `page_size` / `max_products_per_run` / `delay_between_products_ms`）
 - CLI：`node scripts/lib/cde-classify.js [--max N] [--product 名称] [--stats]`
 
-**2c-2（兜底）：博查搜索富化**（`scripts/lib/nmpa-search.js`，CDE 查不到时才用）
+**2c-2（已停用 v4.2.0）：博查搜索富化**（`scripts/lib/nmpa-search.js`；二手搜索不参与分类，`enabled=false`，模块保留备查）
 - 已被 CDE 覆盖（有分类信号）的品种**不再花博查额度**（`run-pipeline.js` 自动跳过）
 - 两级查询：Web Search（便宜，默认）→ AI Search 兜底（`config/nmpa-search.json → ai_search_escalation`，实测收益低，可关）
 - **品种名门控**：结果标题/摘要必须含品种核心名（去盐基/剂型后缀），否则会拿到近似品种的证据（查"富马酸贝达喹啉片"会返回"富马酸卢帕他定片"）
@@ -264,127 +264,28 @@ tail -20 output/runs/pipeline.log
   - **不变量自检**：`flattenTrials` 每次生成都校验列间一致性（规则推断不得有证据来源、官方证据来源必须是 CDE…），有矛盾即 stderr 报警并在 pipeline 日志显示"列一致性自检: N 处矛盾"；新增列**必须同步更新合并规则与自检**
   - 优先级要点：**仿制证据 > 名称启发式**——缓释/复方既可能是 2 类改良型，也可能是原研缓释/复方产品的 4 类仿制（如盐酸他喷他多缓释片），名称本身分不出来
 
-#### Phase 3: 快照 + 沉淀账本 + Excel（累积视图）
-- **增量检测：对比前次快照标记 isNew；同日二次运行对比当天已有快照，避免重复汇报新增**
+#### Phase 3: 快照 + 沉淀账本 + Excel（累积视图 · 只留实锤）
+- **增量检测：对比前次快照标记 isNew；同日二次运行对比当天已有快照,避免重复汇报新增**
 - 从 `config/fda_nitrosamines.json` 生成快照到 `output/runs/YYYY-MM-DD.json`
-- **沉淀账本（`scripts/lib/history.js`，v4.1.0 新增）**：
-  - `output/history/ledger.json` — 每条商机 `first_seen`（历史首次发现，**不随重扫/缓存重置而变**）+ `last_seen` + 最小明细副本
-  - `output/history/runs.json` — 每次运行的批次档案（时间/新增/累计/数据源/CDE 覆盖）
-  - 缓存里已消失的历史行会以 `archived: true` **并入快照**（缓存被重置也保住沉淀）
-  - 一次性回填：`node scripts/lib/history.js --backfill`（从 `output/runs/*.json` 推导 first_seen）
-- **交付物只有 `output/CSP_Leads_Report.xlsx`**（Markdown 报告已于 v4.1.0 移除），6 个 sheet：
+- **沉淀账本（`scripts/lib/history.js`）**：`output/history/ledger.json`（每条商机 first_seen/last_seen，重扫不重置）+ `runs.json`（批次档案，由渲染器写入以保证 ★ 口径单一权威）；缓存里消失的历史行以 `archived:true` 并入快照
+- **交付物只有 `output/CSP_Leads_Report.xlsx`**（Markdown 已移除），6 个 sheet：
   | Sheet | 内容 |
   |---|---|
-  | 概览 | 本批次信息 + **图例（★/首次发现/窗口状态）** + 统计（口径=窗口内活跃行）+ 数据局限 |
-  | P1-口服固体 | **仅窗口内** OSD（含改良释放/颗粒散剂），按 Cat 1→5 分段，段内按企业数降序、进行中优先 |
-  | P2-其他剂型 | 非 OSD，同样按 Cat 分段，仅窗口内 |
-  | 全部商机 | **累积全量**（含已过窗口/已归档）→ 数据透视/图表用 |
+  | 概览 | 本批次信息 + 图例（★/首次发现/窗口状态）+ 分类证据覆盖 + 数据局限 |
+  | P1-口服固体 / P2-其他剂型 | **仅窗口内**活跃商机，按 Cat 1→5 分段；★ 行浅绿底 |
+  | 全部商机 | **累积全量**（含已过窗口/已归档）|
   | 按API汇总 | 一行 = 一个 API（试验数/本次新增/历史行数/企业数/OSD 数/推荐方案）|
-  | 批次历史 | 一行 = 一次运行（时间/新增/当时商机数/归档/数据源/CDE 覆盖）+ 账本按首次发现批次累计 |
-- **累积视图与醒目规则**（v4.1.0 起取代旧的"增量只出新增"）：
-  - `★ 本次新增` 列 = 相对**上一次运行**的新增**且在时间窗内**；该行**整行浅绿底**（`NEW_ROW_FILL`，盖过 Cat 底色——新增更紧迫，下批次自动恢复）
-  - **★ 口径的单一权威 = `report-xlsx.js` 渲染器**（含去重 source|regNo、窗口、企业过滤），批次档案 `runs.json` 的"本次新增"也由渲染器写入——**禁止**在其他地方再实现一份 ★ 判定（会漂移）
-  - `首次发现` 列 = 账本里的历史首次发现批次；`窗口状态` 列 = 窗口内 / 已过窗口 / 已归档
-  - ★ 与「首次发现」不一致是**正常**的：某条商机中途消失又出现会再标 ★（★ 看本批次，首次发现看历史）
-  - P1/P2 只放窗口内活跃商机（历史行稀释工作清单）；历史沉淀只在「全部商机」与「批次历史」
-- **优先度规则**：OSD+Cat1 → OSD+Cat2/3/4/5 → 其他剂型+Cat1/2/3/4/5（Sheet 顺序即优先级；组合视图用 Excel 自动筛选可秒出，不单独拆 sheet）
-- **去重口径**：Excel 中一行 = 一条试验（按 source+登记号 去重）；同一试验命中多个 API（如复方制剂）时用「涉及API(含Cat)」列标注，风险等级取其中最高
-- **分类优先级**：**CDE 官方证据 > 博查搜索证据 > 规则推断 > 组内统一**；代码号在研新药（如 TQC3927）不被品种级仿制证据覆盖
-- **分类口径（产品级一致）**：`enrich.js` 的 `refineClassifications` 按产品名统一——同一产品只要有一次 BE/一致性评价证据（非原研企业）即全部记为仿制药；非原研企业的上市后 IV 期试验同样记为仿制药
-- **CSP 推荐方案按剂型给出候选组合**（依据 CSP 产品选型准则：包装形态优先），并标注需销售向客户确认的信息（如泡罩线 vs 瓶装线）；风险等级只决定优先级
-- **增量模式两个交付物都只含新增商机**（Sheet 名前缀 `新增-`）；全量商机列表仅在 `search_mode: full` 时输出
+  | 批次历史 | 一行 = 一次运行（★新增/抓取新增/累计/窗口内活跃）+ 账本按首次发现批次累计 |
 
-### 脚本退出码
-
-- `0` — 成功完成
-- `1` — FDA 数据不存在（需先执行 Phase 1）
-- 其他 — 脚本内部错误
-
-### 全量模式自动回退
-
-如果 `search_mode` 为 `"full"`：
-- 脚本会重置所有 API 的搜索状态
-- 完成搜索后**自动将 `search_mode` 改回 `"incremental"`**
-- 无需人工干预
-
----
-
-## 运行完成后的操作
-
-Pipeline 脚本执行完毕后：
-
-1. **读取报告**：`cat output/CSP_Leads_Report.md`，向用户汇报结果摘要；并告知 Excel 路径
-2. **检查错误日志**：`cat output/runs/errors.log`（如存在），汇报失败的 API
-3. **输出总结**：
-   - 总 API 数量 / 有临床试验的 API 数量
-   - 总商机数量 / 新增商机数量
-   - 数据源分布（CDT / CT.gov 各多少条）
-   - 剂型分布概要（OSD / 其他 / 未识别）+ 药物分类分布
-   - 各 Cat 分组下企业数最多的 API（优先跟进建议）
-   - 搜索耗时
-
----
-
-## 日常运维
-
-### 定时运行（非交互模式）
-
-```bash
-# 前置：确保 Chrome 已启动（bash scripts/launch-chrome.sh）
-
-# 增量模式（默认），只搜索新 API
-pi -p "/lead-scan nitrosamine"
-
-# 全量模式（需要先改配置）
-# 1. 编辑 config/search-config.json，search_mode 改为 "full"
-# 2. 运行
-pi -p "/lead-scan nitrosamine"
-```
-
-### 长任务托管（全量 3-4 小时，避免终端关闭中断）
-
-```bash
-loginctl enable-linger $USER   # 一次性：让用户级 systemd 服务在无会话时继续运行
-systemd-run --user --unit=csp-scan bash -lc \
-  'cd ~/agents/pi_csp_agent_v3 && node scripts/run-pipeline.js nitrosamine'
-systemctl --user status csp-scan     # 查看状态
-journalctl --user -u csp-scan -f     # 跟踪日志
-```
-
-### 手动触发单源重扫
-
-单源重扫通过重置游标 + 运行 pipeline 实现：
-
-```bash
-# 重扫 CT.gov（保留 CDT 数据）：清除 CT.gov 结果
-node -e "const fs=require('fs'),p='config/fda_nitrosamines.json',d=JSON.parse(fs.readFileSync(p));Object.values(d.apis).forEach(a=>{a.results=(a.results||[]).filter(r=>r.source!=='CT.gov');a.lead_count=a.results.length});fs.writeFileSync(p,JSON.stringify(d,null,2))"
-node scripts/run-pipeline.js nitrosamine
-
-# 重扫 CDT（保留 CT.gov 数据）：重置所有 CDT 游标
-node -e "const fs=require('fs'),p='config/fda_nitrosamines.json',d=JSON.parse(fs.readFileSync(p));Object.values(d.apis).forEach(a=>{a.last_cdt_regno='';a.results=(a.results||[]).filter(r=>r.source!=='CDT');a.lead_count=a.results.length});fs.writeFileSync(p,JSON.stringify(d,null,2))"
-node scripts/run-pipeline.js nitrosamine
-
-# 全量从零重置（重置所有游标 + 双源重扫 + 报告）
-# 设置 search_mode=full 即可，pipeline 会自动重置所有游标
-echo '{"search_mode":"full"}' > config/search-config.json
-node scripts/run-pipeline.js nitrosamine
-```
-
-### 数据文件说明
-
-| 文件 | 作用 |
-|------|------|
-| `config/fda_nitrosamines.json` | 核心数据库：API 列表 + 搜索状态 + 试验结果 |
-| `config/search-config.json` | 搜索模式控制（full / incremental） |
-| `config/api_translations.json` | API 英文名 → 中文名映射 |
-| `scenarios/nitrosamine/scenario.json` | 场景声明式配置（标题/表头列/CSP推荐矩阵/时间窗 lookback_years/缓存与报告路径） |
-| `scenarios/nitrosamine/enrich.js` | 场景专属 hooks（药物分类、CSP推荐、报告小标题等，由 `scripts/lib/report.js` 调用） |
-| `scripts/lib/` | 通用层：`sources.js`(双源采集) / `enrichment.js`(剂型检测) / `snapshot.js`(快照+增量) / `cde-classify.js`(CDE 官方分类) / `nmpa-search.js`(博查兜底) / `history.js`(沉淀账本) / `report.js`(数据模型) / `report-xlsx.js`(Excel 渲染) |
-| `output/runs/YYYY-MM-DD.json` | 运行快照（用于增量对比） |
-| `output/runs/errors.log` | 搜索错误日志 |
-| `output/history/ledger.json` | **沉淀账本**：每条商机首次发现/最近出现（重扫不重置） |
-| `output/history/runs.json` | 运行批次档案（时间和新增/累计） |
-| `output/CSP_Leads_Report.xlsx` | **唯一交付物**：累积视图 Excel（6 sheet：概览/P1/P2/全部商机/按API汇总/批次历史） |
+- **分类语义（v4.2.0 收紧：只留实锤，不做推断）**
+  - `药物分类` / `注册分类` / `分类依据` **只来自 CDE 官方受理记录**；**未取得证据一律留空，不做任何推断**（宁可留空让销售人工核对）
+  - `分类依据` 取值只有两个：`CDE 受理数据（产品级）`（试验产品精确命中某条受理记录，最可靠）/ `CDE 受理数据（品种级）`（仅查到该品种，非该产品）；无证据 → 空
+  - **已删除的列**：`一致性评价`、`证据来源`（前者依赖二手搜索、后者与依据列重复）
+  - **已删除的推断规则**（勿恢复）：BE/生物等效→仿制药、缓释/复方名称→改良型、期次→新药/原研药、IV期→仿制药、产品级规则统一、组内多数票、"未分类"兜底
+  - `观察性研究` 不再占用药物分类列 → 移到 **`分期` 列**显示为 `观察性（非干预）`（注册平台事实字段）
+  - 例外（品种级证据不套用，保持留空）：**原研企业申办**、**代码号在研新药**（如 TQC3927）
+  - 博查搜索富化**已停用**（`config/nmpa-search.json → enabled=false`）：二手搜索不参与分类；模块与缓存保留备查
+  - 教训：**空值必须显式留空**——`flattenTrials` 里任何 `|| '未分类'`、`|| '规则推断'` 式兜底都会把"无证据"伪装成结论（v4.2.0 已清除）
 
 ### 双源搜索状态跟踪
 

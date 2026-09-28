@@ -43,8 +43,6 @@ const HEADERS = [
   { key: 'drugClass', header: '药物分类', width: 14 },
   { key: 'classBasis', header: '分类依据', width: 16 },
   { key: 'regClass', header: '注册分类', width: 10 },
-  { key: 'iec', header: '一致性评价', width: 13 },
-  { key: 'nmpaSrc', header: '证据来源', width: 20 },
   { key: 'csp', header: '推荐CSP方案', width: 34 },
   { key: 'confirm', header: '待确认', width: 18 },
   { key: 'status', header: '试验状态', width: 16 },
@@ -85,25 +83,9 @@ function flattenTrials(ctx, scope = 'all') {
         sponsor: t.sponsor || '',
         drugName: t.drugName || '',
         dosageForm: t.dosageForm || '',
-        drugClass: t.drugClassification || '未分类',
-        classBasis: t.classBasis || '规则推断',
+        drugClass: t.drugClassification || '',       // 空 = 未取得实锤证据（不推断）
+        classBasis: t.classBasis || '',
         regClass: (t.nmpa && t.nmpa.regClass) || '',
-        iec: (t.nmpa && t.nmpa.iec) || '',
-        nmpaSrc: (() => {
-          const n = t.nmpa; if (!n) return '';
-          const u = n.url || '';
-          const dom = (() => { try { return u ? new URL(u).hostname.replace(/^www\./, '') : ''; } catch (_) { return u; } })();
-          const parts = [];
-          if (n.labelSrc === 'bocha') parts.push(dom ? `博查搜索(${dom})` : '博查搜索');
-          else if (n.source === 'cde') parts.push('CDE 官方');
-          else if (n.source === 'cde+bocha') parts.push('CDE 官方 + 博查');
-          else if (dom) parts.push(dom);
-          if (n.source === 'cde+bocha' && n.labelSrc === 'bocha') parts.push('CDE 无分类信号');
-          if (t.classBasis === '规则（证据不适用）') parts.push('未采用');
-          return parts.join(' · ');
-        })(),
-        _basisForCheck: t.classBasis || '规则推断',
-        nmpaLevel: (t.nmpa && t.nmpa.level) || '',
         status: t.status || '',
         indication: t.indication || t.briefTitle || '',
         phase: t.phase || '',
@@ -140,22 +122,19 @@ function flattenTrials(ctx, scope = 'all') {
     if (r._isNewRaw) cur._isNewRaw = true;
     if (r.firstSeen && (!cur.firstSeen || r.firstSeen < cur.firstSeen)) cur.firstSeen = r.firstSeen;
     if (cur.windowState !== '窗口内' && r.windowState === '窗口内') cur.windowState = '窗口内';
-    // 药物分类 / 分类依据 / 注册分类 / 一致性评价 / 证据来源 **必须成套取**：
-    // 同一试验命中多个 API 时，各 API 的证据可能不同（有的查到、有的没查到），
-    // 逐列独立取会让"分类依据=规则推断"配上"证据来源=CDE 官方"这种自相矛盾组合。
-    // 规则：按证据强度挑一条子行，成套搬运这 5 个字段。
-    const BASIS_RANK = { '官方证据(CDE)': 0, '搜索证据': 1, '规则（证据不适用）': 2 };
+    // 药物分类 / 分类依据 / 注册分类 **必须成套取**（v4.2.0：只留 CDE 官方实锤，无证据留空）：
+    // 同一试验命中多个 API 时各 API 证据可能不同，逐列独立取会产出矛盾组合。
+    // 规则：按证据强度（产品级 > 品种级）挑一条子行，成套搬运这 3 个字段。
+    const BASIS_RANK = { 'CDE 受理数据（产品级）': 0, 'CDE 受理数据（品种级）': 1 };
     const rank = (r2) => {
       const b = BASIS_RANK[r2.classBasis] != null ? BASIS_RANK[r2.classBasis] : 3;
       return (r2.nmpaLevel === 'product' ? 0 : 10) + b;   // 产品级证据（精确命中试验产品）最强
     };
     if (rank(r) < rank(cur)) {
       cur.drugClass = r.drugClass; cur.classBasis = r.classBasis;
-      cur.regClass = r.regClass; cur.iec = r.iec; cur.nmpaSrc = r.nmpaSrc;
-      cur.nmpaLevel = r.nmpaLevel;
+      cur.regClass = r.regClass; cur.nmpaLevel = r.nmpaLevel;
     }
     if (!cur.regClass && r.regClass) cur.regClass = r.regClass;
-    if (!cur.iec && r.iec) cur.iec = r.iec;
     // 剂型取能识别到的那个（不同 API 的提取结果可能不同）
     const curOk = cur.dosageForm && cur.dosageForm !== '未识别';
     const rOk = r.dosageForm && r.dosageForm !== '未识别';
@@ -187,23 +166,23 @@ function flattenTrials(ctx, scope = 'all') {
   // ── 不变量自检（列间逻辑一致性）──
   // 目的：新增列时最容易被漏掉的"成套语义"问题，交给机器每次检查，别再靠人眼发现
   const violations = [];
+  const ALLOWED_BASIS = new Set(['CDE 受理数据（产品级）', 'CDE 受理数据（品种级）', '']);
   for (const r of rows) {
-    const basis = r.classBasis || '规则推断';
-    const src = String(r.nmpaSrc || '');
-    if (basis === '规则推断' && src) violations.push([r.key, '规则推断 却有证据来源: ' + src]);
-    if (basis === '官方证据(CDE)' && !src.startsWith('CDE 官方')) violations.push([r.key, '官方证据 但来源非 CDE: ' + (src || '(空)')]);
-    if (basis === '搜索证据' && (!src || !src.includes('博查'))) violations.push([r.key, '搜索证据 但来源未体现博查: ' + (src || '(空)')]);
-    if (basis.startsWith('规则') && src && !src.includes('未采用')) violations.push([r.key, '规则类依据 却显示已采用证据: ' + src]);
-    // 注册分类 ↔ 药物分类 一致性（只校验无歧义码：
-    // 1=创新 2.x=改良 4/5.2/3.3/原6=仿制 5.1=进口原研；"3"有歧义(化药仿制/中药创新/生物进口)不校验）
-    if (basis.startsWith('官方证据') && r.regClass) {
+    const basis = r.classBasis || '';
+    const cls = r.drugClass || '';
+    if (!ALLOWED_BASIS.has(basis)) violations.push([r.key, `分类依据取值非法（应为 CDE 受理数据产品级/品种级或空）: ${basis}`]);
+    if (cls && !basis) violations.push([r.key, `药物分类「${cls}」却没有证据出处`]);
+    if (!cls && basis) violations.push([r.key, `有证据出处「${basis}」却没有药物分类`]);
+    // 注册分类 ↔ 药物分类 必须一致（只校验无歧义码）
+    if (basis && r.regClass) {
       const code = String(r.regClass);
       const want = /^1(\.|$)/.test(code) ? '新药'
         : /^2/.test(code) ? '新药（改良型）'
-        : /^(4|5\.2|3\.3|原6)$/.test(code) ? '仿制药'
-        : /^5\.1$/.test(code) ? '原研药' : null;
-      if (want && r.drugClass !== want) violations.push([r.key, `注册分类 ${code} 应配「${want}」但实为「${r.drugClass}」`]);
+          : /^(4|5\.2|3\.3|原6)$/.test(code) ? '仿制药'
+            : /^5\.1$/.test(code) ? '原研药' : null;
+      if (want && cls !== want) violations.push([r.key, `注册分类 ${code} 应配「${want}」但实为「${cls}」`]);
     }
+    if (r.regClass && !basis) violations.push([r.key, `注册分类 ${r.regClass} 却没有证据出处`]);
   }
 
   // 排序：OSD 优先 → Cat 升序 → 段内企业数降序 → 进行中优先 → 登记日期降序
@@ -331,12 +310,12 @@ function buildOverviewSheet(wb, ctx, rows, isFull, allRows) {
   Object.entries(formCount).sort((a, b) => b[1] - a[1]).forEach(([f, n]) => kv(f, `${n} 条 (${fmtPct(n, rows.length)})`));
   ws.addRow([]);
 
-  title('药物分类依据（可信度）');
+  title('药物分类依据（只留实锤证据）');
   {
     const basis = {};
-    rows.forEach(r => { basis[r.classBasis] = (basis[r.classBasis] || 0) + 1; });
+    rows.forEach(r => { const k = r.classBasis || '（空白：未取得官方证据）'; basis[k] = (basis[k] || 0) + 1; });
     Object.entries(basis).sort((a, b) => b[1] - a[1]).forEach(([k, v]) =>
-      kv(k, `${v} 行 (${fmtPct(v, rows.length)})${k === '官方证据(CDE)' ? ' — 标签与 CDE 官方受理数据一致（可查证）' : k === '搜索证据' ? ' — 标签与博查搜索证据一致' : k === '规则（证据不适用）' ? ' — 该品种有证据但按原研/代码号/改良型排除' : ' — 无可用证据'}`));
+      kv(k, `${v} 行 (${fmtPct(v, rows.length)})${k === 'CDE 受理数据（产品级）' ? ' — 试验产品精确命中 CDE 受理记录（最可靠）' : k === 'CDE 受理数据（品种级）' ? ' — 仅查到该"品种"的受理记录（非该产品）' : ' — 不做推断，留空供人工核对'}`));
     ws.addRow([]);
   }
 
@@ -346,25 +325,21 @@ function buildOverviewSheet(wb, ctx, rows, isFull, allRows) {
   Object.entries(classCount).sort((a, b) => b[1] - a[1]).forEach(([c, n]) => kv(c, `${n} 条 (${fmtPct(n, rows.length)})`));
   ws.addRow([]);
 
-  // 法规分类证据（Phase 2c：CDE 官方受理数据 为主，博查搜索 为兜底）
+  // 分类证据覆盖（Phase 2c：只用 CDE 官方受理数据）
   try {
-    const nm = require('./nmpa-search');
     const cde = require('./cde-classify');
-    const cdeCache = cde.loadCache();
-    const cdeAll = Object.values(cdeCache.products || {});
-    const cdeSig = cdeAll.filter(e => e.confidence === 'high').length;
-    const cdeReg = cdeAll.filter(e => e.confidence === 'high' && (e.facts || {}).regClassDisp).length;
-    const bCache = nm.loadCache();
-    const bEntries = Object.values(bCache.products || {}).filter(e => e.confidence !== 'none');
-    const bCalls = Object.values(bCache.products || {}).reduce((a, e) => a + (e.queries || 0), 0);
-    title('法规分类证据（Phase 2c）');
-    kv('CDE 官方受理数据（主）', Object.keys(cdeCache.products || {}).length + ' 个品种已查，' + cdeSig + ' 个有分类信号'
-      + (cdeReg ? '（其中 ' + cdeReg + ' 个含注册分类）' : ''));
-    kv('博查搜索（兜底）', Object.keys(bCache.products || {}).length + ' 个品种已查（累计查询 ' + bCalls + ' 次），' + bEntries.length + ' 个取得证据');
-    kv('说明', '空白的注册分类/一致性评价列 = 该品种未取得证据（不等于没有），分类回落规则推断');
-    kv('数据源', 'CDE 受理品种信息 = 官方一手申报数据（免费）；博查 = 搜索二手信息，仅用于 CDE 未覆盖的品种');
+    const cdeAll = Object.values(cde.loadCache().products || {});
+    const withSignal = cdeAll.filter(e => e.confidence === 'high');
+    const withClass = withSignal.filter(e => (e.facts || {}).regClassDisp);
+    const blank = rows.filter(r => !r.classBasis).length;
+    title('分类证据覆盖（Phase 2c · CDE 官方受理数据）');
+    kv('CDE 已查品种', `${Object.keys(cde.loadCache().products || {}).length} 个（累计查询 ${cdeAll.reduce((a, e) => a + (e.queries || 0), 0)} 次）`);
+    kv('取得分类信号的品种', `${withSignal.length} 个（其中 ${withClass.length} 个含明确注册分类）`);
+    kv('本表有实锤分类的行', `${rows.length - blank} 行 (${fmtPct(rows.length - blank, rows.length)})`);
+    kv('本表留空的行（待人工核对）', `${blank} 行 (${fmtPct(blank, rows.length)}) — 未取得 CDE 受理记录，不做推断`);
+    kv('数据源', 'CDE 受理品种信息 = 官方一手申报数据（免费）；二手搜索已停用（只留实锤）');
     ws.addRow([]);
-  } catch (_) { /* 未启用搜索富化 */ }
+  } catch (_) {}
 
   title('怎么用');
   [
@@ -382,7 +357,7 @@ function buildOverviewSheet(wb, ctx, rows, isFull, allRows) {
     '临床试验登记数据只覆盖研发阶段：企业是否已上市、用什么包装形式（泡罩/瓶装）拿不到，需销售向客户确认',
     'CDT 侧时间窗按登记号年份过滤（粒度=年），报告层再用首次公示日期做精确兜底',
     'CT.gov 的观察性研究（药物仅作背景）无剂型信息，落在「其他剂型」的「未识别」中',
-    '药物分类为规则推断（BE→仿制药 / 非原研 I-III 期→新药 / 原研中后期→原研药），仅供筛选参考'
+    '药物分类/注册分类**只来自 CDE 官方受理记录**（产品级精确命中优先）；空白 = 未取得官方证据，**不做推断**，请人工核对'
   ].forEach(s => kv('', s));
   ws.getColumn(2).alignment = { wrapText: true, vertical: 'top' };
   return ws;

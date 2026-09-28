@@ -554,7 +554,7 @@ async function phase2c_nmpaEnrich() {
 
   // 2c-2: 博查搜索富化（兜底：CDE 查不到时用；默认只补未覆盖品种）
   const cfg = nmpaSearch.loadConfig();
-  if (!cfg.enabled) { log('已禁用（config/nmpa-search.json → enabled=false）'); return { queried: 0, hits: 0, total: 0, skippedBudget: 0 }; }
+  if (!cfg.enabled) { log('已停用（v4.2.0 起：药物分类只留 CDE 官方实锤证据，二手搜索不参与分类 → config/nmpa-search.json enabled=false）'); return { queried: 0, hits: 0, total: 0, skippedBudget: 0 }; }
   if (!nmpaSearch.getApiKey()) { log('跳过：未配置博查 API Key（BOCHA_API_KEY 或 ~/.pi/web-search.json）'); return { queried: 0, hits: 0, total: 0, skippedBudget: 0 }; }
 
   // 待富化品种 = API 中文名 + 中文产品核心名（与 CLI --all-targets 共用同一函数）

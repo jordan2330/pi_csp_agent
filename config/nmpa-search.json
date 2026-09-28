@@ -1,6 +1,6 @@
 {
-  "_comment": "博查搜索富化（**兜底数据源**）：CDE 官方受理数据（config/cde-classify.json）已覆盖的品种会被自动跳过，博查只补 CDE 查不到的品种",
-  "enabled": true,
+  "_comment": "博查搜索富化（**已停用**：v4.2.0 起药物分类只留 CDE 官方实锤证据，二手搜索不参与分类；模块与缓存保留备查）",
+  "enabled": false,
   "max_queries_per_run": 30,
   "cache_ttl_days": 90,
   "delay_between_queries_ms": 1500,
