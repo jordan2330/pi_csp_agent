@@ -627,6 +627,7 @@ async function phase3_report(isFull) {
     log(`Excel 已生成: ${r.xlsxPath}`);
     log(`累积 ${r.rows} 行（窗口内活跃 ${r.activeRows} / 历史沉淀 ${r.rows - r.activeRows}）| ★ 本次新增 ${r.newRows} 行（P1 ${r.p1} + P2 ${r.p2} 全部可见）`);
     if (r.newOutWin) log(`另有 ${r.newOutWin} 条新发现但已过时间窗（历史沉淀：不标 ★，仅「全部商机」）`);
+    log(r.violations ? `⚠️ 列一致性自检: ${r.violations} 处矛盾（见上方 stderr）` : `列一致性自检: 通过（分类/证据列无矛盾组合）`);
   } catch (e) {
     log(`Excel 生成失败: ${e.message}（如缺依赖请执行 npm i 安装 exceljs）`);
   }

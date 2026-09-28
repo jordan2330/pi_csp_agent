@@ -91,12 +91,16 @@ function flattenTrials(ctx, scope = 'all') {
         iec: (t.nmpa && t.nmpa.iec) || '',
         nmpaSrc: (() => {
           const n = t.nmpa; if (!n) return '';
+          const unused = t.classBasis === '规则（证据不适用）';     // 证据存在但未采用（原研企业/代码号）
           const u = n.url || '';
-          if (n.source === 'cde') return 'CDE 官方';
-          if (n.source === 'cde+bocha') return 'CDE 官方 + 博查';
-          if (!u) return '';
-          try { return new URL(u).hostname.replace(/^www\./, ''); } catch (_) { return u; }
+          let base;
+          if (n.source === 'cde') base = 'CDE 官方';
+          else if (n.source === 'cde+bocha') base = 'CDE 官方 + 博查';
+          else if (!u) base = '';
+          else { try { base = new URL(u).hostname.replace(/^www\./, ''); } catch (_) { base = u; } }
+          return base ? (unused ? `${base}（未采用）` : base) : '';
         })(),
+        _basisForCheck: t.classBasis || '规则推断',
         status: t.status || '',
         indication: t.indication || t.briefTitle || '',
         phase: t.phase || '',
@@ -133,9 +137,18 @@ function flattenTrials(ctx, scope = 'all') {
     if (r._isNewRaw) cur._isNewRaw = true;
     if (r.firstSeen && (!cur.firstSeen || r.firstSeen < cur.firstSeen)) cur.firstSeen = r.firstSeen;
     if (cur.windowState !== '窗口内' && r.windowState === '窗口内') cur.windowState = '窗口内';
+    // 药物分类 / 分类依据 / 注册分类 / 一致性评价 / 证据来源 **必须成套取**：
+    // 同一试验命中多个 API 时，各 API 的证据可能不同（有的查到、有的没查到），
+    // 逐列独立取会让"分类依据=规则推断"配上"证据来源=CDE 官方"这种自相矛盾组合。
+    // 规则：按证据强度挑一条子行，成套搬运这 5 个字段。
+    const BASIS_RANK = { '官方证据(CDE)': 0, '搜索证据': 1, '规则（证据不适用）': 2 };
+    const rank = (b) => (BASIS_RANK[b] != null ? BASIS_RANK[b] : 3);   // 规则推断/缺省 = 最弱
+    if (rank(r.classBasis) < rank(cur.classBasis)) {
+      cur.drugClass = r.drugClass; cur.classBasis = r.classBasis;
+      cur.regClass = r.regClass; cur.iec = r.iec; cur.nmpaSrc = r.nmpaSrc;
+    }
     if (!cur.regClass && r.regClass) cur.regClass = r.regClass;
     if (!cur.iec && r.iec) cur.iec = r.iec;
-    if (!cur.nmpaSrc && r.nmpaSrc) cur.nmpaSrc = r.nmpaSrc;
     // 剂型取能识别到的那个（不同 API 的提取结果可能不同）
     const curOk = cur.dosageForm && cur.dosageForm !== '未识别';
     const rOk = r.dosageForm && r.dosageForm !== '未识别';
@@ -164,6 +177,18 @@ function flattenTrials(ctx, scope = 'all') {
     };
   });
 
+  // ── 不变量自检（列间逻辑一致性）──
+  // 目的：新增列时最容易被漏掉的"成套语义"问题，交给机器每次检查，别再靠人眼发现
+  const violations = [];
+  for (const r of rows) {
+    const basis = r.classBasis || '规则推断';
+    const src = String(r.nmpaSrc || '');
+    if (basis === '规则推断' && src) violations.push([r.key, '规则推断 却有证据来源: ' + src]);
+    if (basis === '官方证据(CDE)' && !src.startsWith('CDE 官方')) violations.push([r.key, '官方证据 但来源非 CDE: ' + (src || '(空)')]);
+    if (basis === '搜索证据' && !src) violations.push([r.key, '搜索证据 但来源为空']);
+    if (basis.startsWith('规则') && src && !src.includes('未采用')) violations.push([r.key, '规则类依据 却显示已采用证据: ' + src]);
+  }
+
   // 排序：OSD 优先 → Cat 升序 → 段内企业数降序 → 进行中优先 → 登记日期降序
   rows.sort((a, b) => {
     if (a.osd !== b.osd) return a.osd ? -1 : 1;
@@ -174,6 +199,12 @@ function flattenTrials(ctx, scope = 'all') {
     if (aAct !== bAct) return aAct - bAct;
     return String(b.regDate).localeCompare(String(a.regDate));
   });
+  if (violations.length) {
+    console.error(`⚠️ 分类/证据列一致性自检发现 ${violations.length} 处矛盾（前 5 条）：`);
+    violations.slice(0, 5).forEach(([k, msg]) => console.error(`   - ${k}: ${msg}`));
+    console.error('   → 请检查 report.js 的 classBasis 判定与 report-xlsx 的合并规则是否同步');
+  }
+  rows.violations = violations;
   return rows;
 }
 
@@ -429,13 +460,21 @@ function generateWorkbook(snapshot, scenario, isFull, runMeta = {}) {
     });
   } catch (_) { /* runs.json 不可写时不影响交付物 */ }
 
+  // 结构性断言：活跃行必须完全等于 P1+P2，且不得混入历史行
+  const osdRows = activeRows.filter(r => r.osd), otherRows = activeRows.filter(r => !r.osd);
+  if (osdRows.length + otherRows.length !== activeRows.length) {
+    console.error('⚠️ 自检: P1+P2 行数与活跃行数不符');
+  }
+  const leaked = activeRows.filter(r => r.windowState !== '窗口内');
+  if (leaked.length) console.error(`⚠️ 自检: ${leaked.length} 条历史行混进了 P1/P2`);
+
   const wb = new ExcelJS.Workbook();
   wb.creator = 'pi_csp_agent';
   wb.created = new Date();
 
   buildOverviewSheet(wb, ctx, activeRows, isFull, allRows);
-  writeTrialSheet(wb, 'P1-口服固体', activeRows.filter(r => r.osd), HEADERS);
-  writeTrialSheet(wb, 'P2-其他剂型', activeRows.filter(r => !r.osd), HEADERS);
+  writeTrialSheet(wb, 'P1-口服固体', osdRows, HEADERS);
+  writeTrialSheet(wb, 'P2-其他剂型', otherRows, HEADERS);
   writeTrialSheet(wb, '全部商机', allRows, HEADERS);
   buildApiSheet(wb, ctx, isFull);
   buildBatchSheet(wb);
@@ -447,10 +486,11 @@ function generateWorkbook(snapshot, scenario, isFull, runMeta = {}) {
     xlsxPath,
     rows: allRows.length,
     activeRows: activeRows.length,
-    p1: activeRows.filter(r => r.osd).length,
-    p2: activeRows.filter(r => !r.osd).length,
+    p1: osdRows.length,
+    p2: otherRows.length,
     newRows,
-    newOutWin
+    newOutWin,
+    violations: (allRows.violations || []).length
   }));
 }
 
