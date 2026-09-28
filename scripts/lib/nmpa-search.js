@@ -315,14 +315,46 @@ function collectTargets(apis) {
 }
 
 // ── 判定（供分类使用）：从 facts 推导可用的分类信号 ──
+// 是否"仿制类"注册分类码（决定 regClass 能否配 仿制药 标签）
+function isGenericCode(code) {
+  const c = String(code || '');
+  if (!c) return false;
+  if (/^原6$/.test(c)) return true;
+  if (/^(3|4)$/.test(c) || /^5\.2$/.test(c) || /^3\.3$/.test(c)) return true;
+  return false;
+}
+
+/**
+ * 由 facts 推导（标签, 注册分类）——**单一权威**：
+ * 同一函数同时产出"药物分类标签"和"注册分类展示码"，
+ * 两者按同一优先级（仿制 > 改良 > 创新 > 进口原研）推导，数学上不可能互相矛盾。
+ * 教训（v4.1.3）：此前标签在 enrich.js 按 generic 优先、注册分类在 classifyFacts 按
+ * genericClass34→创新→改良 推导，遇到 {iec:true, improved:true} 就产出"仿制药 + 注册2"。
+ */
+function labelFromFacts(facts) {
+  const f = facts || {};
+  const generic = !!(f.genericClass34 || f.iec || f.firstGeneric || f.aiGeneric || f.aiIec || f.aiFirstGeneric);
+  if (generic) {
+    const code = f.regClassDisp && isGenericCode(f.regClassDisp) ? f.regClassDisp
+      : (isGenericCode(f.genericClass34) ? String(f.genericClass34) : '');
+    return { label: '仿制药', regClass: code, kind: 'generic' };
+  }
+  if (f.improved || f.aiImproved) return { label: '新药（改良型）', regClass: f.regClassDisp || '2', kind: 'improved' };
+  if (f.innovative || f.aiInnovative) return { label: '新药', regClass: f.regClassDisp || '1', kind: 'innovative' };
+  if (f.originator) return { label: '原研药', regClass: f.regClassDisp || '', kind: 'originator' };
+  return { label: null, regClass: f.regClassDisp || '', kind: 'none' };
+}
+
 function classifyFacts(entry) {
   const f = (entry && entry.facts) || {};
+  const u = labelFromFacts(f);
   return {
     innovative: !!(f.innovative || f.aiInnovative),
     improved: !!(f.improved || f.aiImproved),
     generic: !!(f.genericClass34 || f.iec || f.firstGeneric || f.aiGeneric || f.aiIec || f.aiFirstGeneric),
     iecPassed: !!(f.iec || f.aiIec),
-    regClass: f.regClassDisp || (f.genericClass34 ? (String(f.genericClass34).match(/[345]/) || [])[0] : (f.innovative ? '1' : (f.improved ? '2' : '')))
+    regClass: u.regClass,          // 与标签同源推导
+    label: u.label
   };
 }
 
@@ -336,7 +368,7 @@ function isQueryableProduct(name) {
   return /^[\u4e00-\u9fff]{2,}$/.test(core);
 }
 
-module.exports = { coreName, collectTargets, extractFacts, classifyFacts, enrichProduct, enrichProducts, loadCache, saveCache, loadConfig, getApiKey, isQueryableProduct, aiAssertions, cleanAiAnswer, CACHE_FILE };
+module.exports = { coreName, collectTargets, extractFacts, classifyFacts, labelFromFacts, isGenericCode, enrichProduct, enrichProducts, loadCache, saveCache, loadConfig, getApiKey, isQueryableProduct, aiAssertions, cleanAiAnswer, CACHE_FILE };
 
 // ── CLI ──
 if (require.main === module) {

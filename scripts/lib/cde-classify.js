@@ -29,7 +29,7 @@ const WS = path.join(__dirname, '..', '..');
 const CACHE_FILE = path.join(WS, 'config', 'cde_class_cache.json');
 const CONFIG_FILE = path.join(WS, 'config', 'cde-classify.json');
 const CDE_URL = 'https://www.cde.org.cn/main/xxgk/listpage/9f9c74c73e0f8f56a8bfbc646055026d';
-const RULES_VERSION = 1;   // 规则变更 → 旧证据自动失效
+const RULES_VERSION = 2;   // v2: 产品级证据 + 类型感知分类解析（旧缓存失效重查）   // 规则变更 → 旧证据自动失效
 
 const DEFAULTS = {
   enabled: true,
@@ -74,62 +74,127 @@ function coreName(productName) {
 function baseCompany(s) {
   return String(s || '').split(/[;；]/)[0].trim().replace(/[（(].*?[）)]/g, '');
 }
-// 受理号前缀 → 申请类型补充判断（CYHS/CXHS=境内申报，JYHS/JXHS=进口，CYHB=补充申请…）
-function normClass(raw) {
+// ── 注册分类解析（含子类 + 按药品类型语义）──
+// 权威依据：
+//  化药《化学药品注册分类及申报资料要求》2020年第44号
+//    1类 境内外均未上市创新药 ｜ 2类 境内外均未上市改良型新药
+//      2.1 已知活性成份的光学异构体/成酯/成盐/改酸碱基金属/非共价键衍生物
+//      2.2 已知活性成份的新剂型（含新给药系统）、新处方工艺、新给药途径
+//      2.3 已知活性成份的新复方制剂 ｜ 2.4 已知活性成份的新适应症
+//    3类 境内仿制"境外上市但境内未上市"原研药品 ｜ 4类 境内仿制"已在境内上市"原研药品
+//    5类 境外已上市境内未上市：5.1 境外上市原研药品申请境内上市 ｜ 5.2 境外上市非原研（仿制）药品申请境内上市
+//  生物制品（2020年第43号）：1类 创新型 ｜ 2类 改良型 ｜ 3类 境内或境外已上市生物制品
+//    3.1 境外生产境外已上市境内未上市申报上市 ｜ 3.2 境外已上市境内未上市申报境内生产上市
+//    3.3 生物类似药 ｜ 3.4 其他
+//  中药（2020年第68号）：1类 创新药 ｜ 2类 改良型新药 ｜ 3类 古代经典名方中药复方制剂 ｜ 4类 同名同方药
+//  旧分类（2020-07-01 前受理，平台显示"原X"）：原1/原3/原5 新药 ｜ 原2/原4 新药（改良型）｜ 原6 仿制药
+//
+// 返回 { code: 展示用完整分类（含子类）, signal: 'innovative'|'improved'|'generic'|'originator'|'' }
+function parseClass(raw, drugType) {
   const s = String(raw || '').trim();
-  if (!s) return '';
-  if (/^5\.[12]$/.test(s)) return s;
-  const m = s.match(/[1-4]/);
-  return m ? m[0] : '';
+  if (!s) return { code: '', signal: '' };
+  const type = /中药/.test(String(drugType || '')) ? 'tcm'
+    : /生物|疫苗|细胞|基因/.test(String(drugType || '')) ? 'bio' : 'chem';
+
+  if (/^原/.test(s)) {                       // 旧分类
+    const n = (s.match(/[0-9]/) || [])[0];
+    if (!n) return { code: s, signal: '' };
+    if (n === '6') return { code: '原6', signal: 'generic' };
+    if (n === '2' || n === '4') return { code: '原' + n, signal: 'improved' };
+    return { code: '原' + n, signal: 'innovative' };
+  }
+
+  const code = (s.match(/^[1-5](\.[0-9])?/) || [])[0] || '';
+  if (!code) return { code: s, signal: '' };
+  const major = code[0];
+
+  if (type === 'tcm') {
+    if (major === '1') return { code, signal: 'innovative' };
+    if (major === '2') return { code, signal: 'improved' };
+    if (major === '3') return { code, signal: 'innovative' };   // 古代经典名方 ≠ 仿制
+    if (major === '4') return { code, signal: 'generic' };      // 同名同方药
+    return { code, signal: '' };
+  }
+  if (type === 'bio') {
+    if (major === '1') return { code, signal: 'innovative' };
+    if (major === '2') return { code, signal: 'improved' };
+    if (code === '3.3') return { code, signal: 'generic' };     // 生物类似药
+    if (major === '3') return { code, signal: 'originator' };   // 进口/其他已上市生物制品
+    return { code, signal: '' };
+  }
+  // 化药
+  if (major === '1') return { code, signal: 'innovative' };
+  if (major === '2') return { code, signal: 'improved' };
+  if (major === '3' || major === '4') return { code, signal: 'generic' };
+  if (code === '5.1') return { code, signal: 'originator' };
+  if (code === '5.2') return { code, signal: 'generic' };
+  return { code, signal: '' };
 }
 
 /**
- * 从受理记录行推导分类事实（facts 键与 nmpa-search 兼容）
- * 注册分类口径（《化学药品注册分类及申报资料要求》2020）：
- *   1类=创新药  2类=改良型新药  3类/4类=境内仿制(3类仿境外未上市原研/4类仿境内已上市原研)
- *   5.1类=境外已上市增加境内适应症  5.2类=境外生产仿制药
+ * 从受理记录行推导分类事实（**产品级 + 品种级两套**）
+ *
+ * 为什么要产品级：CDE 按"药品名称"子串检索，查"沙丁胺醇"会同时返回
+ * 「硫酸沙丁胺醇片(4类仿制)」和「盐酸左沙丁胺醇异丙托溴铵吸入溶液(2.1类新药)」——
+ * 只做品种级聚合会把改良型新药误判成仿制药。故按药品名称聚合出 products 映射，
+ * 挂证据时优先用"试验产品精确命中"的那一条。
+ *
+ * facts 键与 nmpa-search 兼容：genericClass34 / regClassDisp / iec / innovative / improved / originator
  */
 function deriveFacts(rows) {
-  const genericClasses = new Set();
+  const genericCodes = new Set();
   const companies = {};            // 企业 → 分类集合（供"同企业"证据展示）
+  const products = {};             // 药品名称 → { code, signal, applyType, company, date, iec }
   const evidence = [];
-  let iec = false, innovative = false, improved = false, classed = 0;
+  let iec = false, innovative = false, improved = false, originator = false, classed = 0;
 
   for (const r of rows) {
-    const cls = normClass(r.regClass);
+    const parsed = parseClass(r.regClass, r.drugType);
     const co = baseCompany(r.company);
-    if (cls) {
+    const rowIec = /一致性评价/.test(r.applyType || '');
+    let signal = parsed.signal;
+    if (!signal && /仿制/.test(r.applyType || '')) signal = 'generic';   // 申请类型=仿制但分类空
+    if (rowIec) iec = true;
+
+    if (signal) {
       classed++;
-      if (cls === '1') innovative = true;
-      else if (cls === '2') improved = true;
-      else if (cls === '3' || cls === '4' || cls === '5.2') genericClasses.add(cls);
+      if (signal === 'generic') genericCodes.add(parsed.code || '仿制');
+      else if (signal === 'improved') improved = true;
+      else if (signal === 'innovative') innovative = true;
+      else if (signal === 'originator') originator = true;
     }
-    if (/一致性评价/.test(r.applyType || '')) iec = true;
-    if (/仿制/.test(r.applyType || '') && !cls) genericClasses.add('4');   // 申请类型=仿制但分类空
-    if (co) companies[co] = [...new Set([...(companies[co] || []), cls || (r.applyType || '').slice(0, 6)])];
-    if (evidence.length < 40) evidence.push({ text: [r.drugName, r.regClass ? r.regClass + '类' : '', r.applyType, co, r.date].filter(Boolean).join(' · '), url: '' });
+    if (co) companies[co] = [...new Set([...(companies[co] || []), parsed.code || (r.applyType || '').slice(0, 6)])];
+
+    // 产品级：同一药品名称只保留最强信号（仿制 > 改良 > 创新？不——按该产品自己的分类，取首个有分类的行）
+    const pname = String(r.drugName || '').trim();
+    if (pname && (!products[pname] || (!products[pname].code && parsed.code))) {
+      products[pname] = { code: parsed.code || '', signal, applyType: r.applyType || '', company: co, date: r.date || '', iec: rowIec };
+    }
+    if (evidence.length < 40) evidence.push({ text: [r.drugName, parsed.code ? parsed.code + '类' : '', r.applyType, co, r.date].filter(Boolean).join(' · '), url: '' });
   }
 
-  const order = ['4', '3', '5.2'];
-  const dispClass = order.find(c => genericClasses.has(c)) || '';
+  // 品种级展示码：仿制 > 改良 > 创新 > 进口原研
+  const order = ['4', '3', '5.2', '3.3', '原6', '仿制'];
+  const dispGeneric = order.find(c => genericCodes.has(c)) || (genericCodes.size ? [...genericCodes][0] : '');
+  const dispClass = dispGeneric || (improved ? '2' : (innovative ? '1' : (originator ? '5.1' : '')));
+
   const facts = {
-    genericClass34: dispClass,
+    genericClass34: dispGeneric,
     regClassDisp: dispClass,
     ...(iec ? { iec: true } : {}),
     ...(innovative ? { innovative: true } : {}),
     ...(improved ? { improved: true } : {}),
+    ...(originator ? { originator: true } : {}),
     totalRows: rows.length,
     classedRows: classed
   };
-  // 摘要（Excel 证据来源列可读）
-  const summary = [
+  const parts = [
     rows.length ? `CDE受理${rows.length}条` : '',
-    dispClass ? `${dispClass}类仿制` : '',
-    iec ? '一致性评价申报' : '',
-    innovative ? '1类创新' : '',
-    improved ? '2类改良' : ''
-  ].filter(Boolean).join(' / ');
-  return { facts, companies, evidence, summary, hasSignal: !!(dispClass || iec || innovative || improved) };
+    Object.keys(products).length > 1 ? `${Object.keys(products).length}个产品` : '',
+    dispGeneric ? `${dispGeneric}类仿制` : '',
+    improved ? '2类改良' : '', innovative ? '1类创新' : '', originator ? '进口原研' : '', iec ? '一致性评价申报' : ''
+  ].filter(Boolean);
+  return { facts, products, companies, evidence, summary: parts.join(' / '), hasSignal: !!(dispGeneric || iec || innovative || improved || originator) };
 }
 
 // ── 浏览器操作 ──
@@ -320,6 +385,7 @@ async function enrichProduct(page, productName, opts = {}) {
     }
     const d = deriveFacts(rows);
     entry.facts = d.facts;
+    entry.products = d.products;      // 产品级证据（挂证据时优先精确命中）
     entry.companies = d.companies;
     entry.evidence = d.evidence;
     entry.note = d.summary;
@@ -386,7 +452,7 @@ function collectTargets(apis) {
 }
 
 // ── CLI ──
-module.exports = { coreName, collectTargets, deriveFacts, enrichProduct, queryProduct, parseTableWithTotal, openForm, setPageSize, connectBrowser, FIRST_ROW, enrichProducts, loadCache, saveCache, loadConfig, isFresh, CACHE_FILE, CDE_URL };
+module.exports = { coreName, collectTargets, deriveFacts, parseClass, enrichProduct, queryProduct, parseTableWithTotal, openForm, setPageSize, connectBrowser, FIRST_ROW, enrichProducts, loadCache, saveCache, loadConfig, isFresh, CACHE_FILE, CDE_URL };
 
 if (require.main === module) {
   const args = process.argv.slice(2);

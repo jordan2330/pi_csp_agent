@@ -146,6 +146,32 @@ function buildLeadModel(snapshot, scenario, isFull) {
         // 证据优先级：CDE 官方受理数据（一手） > 博查搜索证据（二手）
         // 依次尝试：产品级证据 → API 级证据（仅当归属成立）；跳过 confidence=none 的条目
         // 注意必须"逐个校验后再回退"：产品级查到但无记录时也要回退到 API 级（否则漏证据）
+        // 产品级证据匹配（v4.1.3 关键修复）：
+        // CDE 按"药品名称"**子串**检索 → 一条 entry 可能含多个产品
+        // （查"沙丁胺醇"会同时返回「硫酸沙丁胺醇片(4类仿制)」和「盐酸左沙丁胺醇异丙托溴铵吸入溶液(2.1类新药)」）。
+        // 必须优先用"试验产品精确命中"的那条产品级证据，否则改良型新药会被品种级聚合误判成仿制药。
+        const normName = (x) => String(x || '').replace(/[（(][^）)]*[）)]/g, '').replace(/\s+/g, '');
+        const matchProduct = (entry, drugRaw) => {
+          const prods = (entry && entry.products) || {};
+          const nd = normName(drugRaw);
+          if (!nd) return null;
+          let best = null;
+          for (const [name, pf] of Object.entries(prods)) {
+            const nn = normName(name);
+            if (!nn) continue;
+            if (nn === nd) return { name, pf };
+            if ((nd.includes(nn) || nn.includes(nd)) && (!best || nn.length > normName(best.name).length)) best = { name, pf };
+          }
+          return best;
+        };
+        const factsFromProduct = (pf) => ({
+          regClassDisp: pf.code || '',
+          genericClass34: pf.signal === 'generic' ? (pf.code || '仿制') : '',
+          ...(pf.iec ? { iec: true } : {}),
+          ...(pf.signal === 'improved' ? { improved: true } : {}),
+          ...(pf.signal === 'innovative' ? { innovative: true } : {}),
+          ...(pf.signal === 'originator' ? { originator: true } : {})
+        });
         const pick = (cache, source) => {
           const cands = [cache.products[drugCore], (belongs && cnCore) ? cache.products[cnCore] : null];
           const e = cands.find(x => x && x.confidence !== 'none');
@@ -154,22 +180,38 @@ function buildLeadModel(snapshot, scenario, isFull) {
         const cdeHit = pick(cdeCache, 'cde');
         const bochaHit = pick(nmpaCache, 'bocha');
         if (!cdeHit && !bochaHit) return null;
-        // 证据合并：注册分类/创新改良 以 CDE 官方为准（权威）；**一致性评价（过评）用博查补齐**
-        // （CDE 受理目录只覆盖"按一致性评价申报"的受理记录，历史过评品种多在博查新闻里）
-        const cdeFacts = (cdeHit && cdeHit.entry.facts) || {};
+
+        // 标签来源与"一致性评价"分开处理（v4.1.3）：
+        //   标签/注册分类：产品级 CDE > 品种级 CDE > 博查（**不混用**，否则博查的品种级"过评"
+        //    会把产品级 2.x 改良型新药又拉回"仿制药"）
+        //   一致性评价列：产品级/品种级 CDE 或 博查 有其一即标注（列语义 = 该品种已有过评仿制）
+        let facts = null, level = 'api', hitProduct = '';
+        if (cdeHit) {
+          const pm = matchProduct(cdeHit.entry, t.drugName);
+          if (pm && pm.pf && pm.pf.signal) { facts = factsFromProduct(pm.pf); level = 'product'; hitProduct = pm.name; }
+          else { facts = cdeHit.entry.facts || {}; }
+        }
         const bochaFacts = (bochaHit && bochaHit.entry.facts) || {};
-        const facts = { ...bochaFacts, ...cdeFacts };
-        const iecFromBocha = !!(bochaFacts.iec && !cdeFacts.iec);
-        if (iecFromBocha) facts.iec = true;
+        const cdeFacts = (cdeHit && cdeHit.entry.facts) || {};
+        const uProd = level === 'product' ? nm.labelFromFacts(facts) : null;
+        const uCde = cdeHit ? nm.labelFromFacts(cdeFacts) : null;
+        const uBocha = bochaHit ? nm.labelFromFacts(bochaFacts) : null;
+        const chosen = (uProd && uProd.label) ? { u: uProd, src: 'cde', lvl: 'product' }
+          : (uCde && uCde.label) ? { u: uCde, src: 'cde', lvl: 'api' }
+            : (uBocha && uBocha.label) ? { u: uBocha, src: 'bocha', lvl: 'api' } : null;
+        const u = chosen ? chosen.u : { label: null, regClass: '', kind: 'none' };
+        if (chosen) level = chosen.lvl;
+        const iecPassed = !!(facts && facts.iec) || !!(cdeFacts.iec) || !!(bochaFacts.iec) || !!(facts && facts.aiIec);
         const entry = (cdeHit || bochaHit).entry;
-        const f = nm.classifyFacts({ facts });
         return {
-          regClass: f.regClass || '', iec: f.iecPassed ? '通过/视同通过' : '',
-          generic: f.generic, innovative: f.innovative, improved: f.improved,
+          regClass: u.regClass || '', label: u.label || '', level, product: hitProduct,
+          labelSrc: chosen ? chosen.src : '',
+          iec: iecPassed ? '通过/视同通过' : '',
+          generic: u.kind === 'generic', innovative: u.kind === 'innovative', improved: u.kind === 'improved',
           confidence: entry.confidence,
           source: cdeHit ? (bochaHit ? 'cde+bocha' : 'cde') : 'bocha',
-          note: [entry.note || '', iecFromBocha ? '过评证据来自博查' : ''].filter(Boolean).join(' / '),
-          url: ((cdeHit ? cdeHit.entry.sources : bochaHit.entry.sources) || [])[0] || '',
+          note: [entry.note || '', hitProduct ? `产品级命中 ${hitProduct}` : '', (bochaFacts.iec && !cdeFacts.iec && !(facts && facts.iec)) ? '过评证据来自博查' : ''].filter(Boolean).join(' / '),
+          url: ((chosen && chosen.src === 'bocha') ? (bochaHit ? bochaHit.entry.sources : []) : (cdeHit ? cdeHit.entry.sources : bochaHit.entry.sources) || [])[0] || '',
           evidence: ((entry.evidence || [])[0] || {}).text || ''
         };
       })();
@@ -255,9 +297,9 @@ function buildLeadModel(snapshot, scenario, isFull) {
       const n = t.nmpa;
       const cls = t.drugClassification || '未分类';
       if (!n) { t.classBasis = '规则推断'; continue; }
-      const byEv = n.generic ? '仿制药' : (n.improved ? '新药（改良型）' : (n.innovative ? '新药' : null));
+      const byEv = n.label || null;      // 与注册分类同源（labelFromFacts）
       t.classBasis = (byEv && cls === byEv)
-        ? (String(n.source || '').startsWith('cde') ? '官方证据(CDE)' : '搜索证据')
+        ? (n.labelSrc === 'cde' ? '官方证据(CDE)' : (n.labelSrc === 'bocha' ? '搜索证据' : '规则（证据不适用）'))
         : '规则（证据不适用）';
     }
   }

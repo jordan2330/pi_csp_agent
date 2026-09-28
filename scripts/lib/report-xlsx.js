@@ -91,16 +91,19 @@ function flattenTrials(ctx, scope = 'all') {
         iec: (t.nmpa && t.nmpa.iec) || '',
         nmpaSrc: (() => {
           const n = t.nmpa; if (!n) return '';
-          const unused = t.classBasis === '规则（证据不适用）';     // 证据存在但未采用（原研企业/代码号）
           const u = n.url || '';
-          let base;
-          if (n.source === 'cde') base = 'CDE 官方';
-          else if (n.source === 'cde+bocha') base = 'CDE 官方 + 博查';
-          else if (!u) base = '';
-          else { try { base = new URL(u).hostname.replace(/^www\./, ''); } catch (_) { base = u; } }
-          return base ? (unused ? `${base}（未采用）` : base) : '';
+          const dom = (() => { try { return u ? new URL(u).hostname.replace(/^www\./, '') : ''; } catch (_) { return u; } })();
+          const parts = [];
+          if (n.labelSrc === 'bocha') parts.push(dom ? `博查搜索(${dom})` : '博查搜索');
+          else if (n.source === 'cde') parts.push('CDE 官方');
+          else if (n.source === 'cde+bocha') parts.push('CDE 官方 + 博查');
+          else if (dom) parts.push(dom);
+          if (n.source === 'cde+bocha' && n.labelSrc === 'bocha') parts.push('CDE 无分类信号');
+          if (t.classBasis === '规则（证据不适用）') parts.push('未采用');
+          return parts.join(' · ');
         })(),
         _basisForCheck: t.classBasis || '规则推断',
+        nmpaLevel: (t.nmpa && t.nmpa.level) || '',
         status: t.status || '',
         indication: t.indication || t.briefTitle || '',
         phase: t.phase || '',
@@ -142,10 +145,14 @@ function flattenTrials(ctx, scope = 'all') {
     // 逐列独立取会让"分类依据=规则推断"配上"证据来源=CDE 官方"这种自相矛盾组合。
     // 规则：按证据强度挑一条子行，成套搬运这 5 个字段。
     const BASIS_RANK = { '官方证据(CDE)': 0, '搜索证据': 1, '规则（证据不适用）': 2 };
-    const rank = (b) => (BASIS_RANK[b] != null ? BASIS_RANK[b] : 3);   // 规则推断/缺省 = 最弱
-    if (rank(r.classBasis) < rank(cur.classBasis)) {
+    const rank = (r2) => {
+      const b = BASIS_RANK[r2.classBasis] != null ? BASIS_RANK[r2.classBasis] : 3;
+      return (r2.nmpaLevel === 'product' ? 0 : 10) + b;   // 产品级证据（精确命中试验产品）最强
+    };
+    if (rank(r) < rank(cur)) {
       cur.drugClass = r.drugClass; cur.classBasis = r.classBasis;
       cur.regClass = r.regClass; cur.iec = r.iec; cur.nmpaSrc = r.nmpaSrc;
+      cur.nmpaLevel = r.nmpaLevel;
     }
     if (!cur.regClass && r.regClass) cur.regClass = r.regClass;
     if (!cur.iec && r.iec) cur.iec = r.iec;
@@ -185,8 +192,18 @@ function flattenTrials(ctx, scope = 'all') {
     const src = String(r.nmpaSrc || '');
     if (basis === '规则推断' && src) violations.push([r.key, '规则推断 却有证据来源: ' + src]);
     if (basis === '官方证据(CDE)' && !src.startsWith('CDE 官方')) violations.push([r.key, '官方证据 但来源非 CDE: ' + (src || '(空)')]);
-    if (basis === '搜索证据' && !src) violations.push([r.key, '搜索证据 但来源为空']);
+    if (basis === '搜索证据' && (!src || !src.includes('博查'))) violations.push([r.key, '搜索证据 但来源未体现博查: ' + (src || '(空)')]);
     if (basis.startsWith('规则') && src && !src.includes('未采用')) violations.push([r.key, '规则类依据 却显示已采用证据: ' + src]);
+    // 注册分类 ↔ 药物分类 一致性（只校验无歧义码：
+    // 1=创新 2.x=改良 4/5.2/3.3/原6=仿制 5.1=进口原研；"3"有歧义(化药仿制/中药创新/生物进口)不校验）
+    if (basis.startsWith('官方证据') && r.regClass) {
+      const code = String(r.regClass);
+      const want = /^1(\.|$)/.test(code) ? '新药'
+        : /^2/.test(code) ? '新药（改良型）'
+        : /^(4|5\.2|3\.3|原6)$/.test(code) ? '仿制药'
+        : /^5\.1$/.test(code) ? '原研药' : null;
+      if (want && r.drugClass !== want) violations.push([r.key, `注册分类 ${code} 应配「${want}」但实为「${r.drugClass}」`]);
+    }
   }
 
   // 排序：OSD 优先 → Cat 升序 → 段内企业数降序 → 进行中优先 → 登记日期降序
