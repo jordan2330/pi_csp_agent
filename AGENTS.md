@@ -74,6 +74,7 @@ This is a Pi Coding Agent project for CSP (Aptar active packaging) sales lead di
   2. Integrated into the Phase flow (e.g., Phase 2 step: "run `node scripts/xxx.js`")
 - **Standalone scripts are acceptable ONLY as temporary dev tools.** If you create one, ask yourself: "Will the next run of `/lead-scan` automatically use this?" If not, you MUST update the SKILL.md.
 - **Before considering a task complete**, verify that the pipeline (SKILL.md + scripts/run-pipeline.js) produces the correct output end-to-end without manual intervention.
+- **Excel 新增/修改列时必须同步四处**（v4.1.2 教训，已三次踩坑）：① 列定义 `HEADERS` ② 行构建 `flattenTrials` ③ **合并规则**（同一试验命中多 API 时哪些字段成套取、哪些取最值）④ 不变量自检。漏掉②③会出现「分类依据=规则推断却配 CDE 证据来源」这类列间矛盾，且同一试验跨 API 的字段会被拼凑成矛盾组合
 - **Scenario-specific logic** belongs in `scenarios/<name>/scenario.json` (declarative) or `scenarios/<name>/enrich.js` (hooks), NOT in the generic `scripts/lib/` modules.
 
 ## Report Output Rules
