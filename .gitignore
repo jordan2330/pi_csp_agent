@@ -26,3 +26,4 @@ output/CSP_Leads_Report.xlsx
 /config/nmpa_class_cache.json
 config/cde_class_cache.json
 output/history/
+.tmp/
