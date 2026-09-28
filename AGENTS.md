@@ -81,7 +81,7 @@ This is a Pi Coding Agent project for CSP (Aptar active packaging) sales lead di
 - **交付物只有 Excel**（`output/CSP_Leads_Report.xlsx`）。Markdown 报告已移除（v4.1.0 起）——它的内容与 Excel 重复，且每轮 16 万字符对 pi 摘要无价值。
 - **Excel 一律是「累积视图」**（v4.1.0 起，取代旧的"增量模式只出新增"规则）：
   - 每次都输出**全量沉淀**（上限外的历史行也在「全部商机」Sheet），本次新增用 **★ 列 + 整行浅绿底** 醒目标识
-  - `★ 本次新增` = 相对**上一次运行**的新增（本批次）；**首次发现** = 历史上第一次见到（沉淀账本，不随重扫重置）——两者不一致是正常的
+  - `★ 本次新增` = 相对**上一次运行**的新增**且在时间窗内**（P1+P2+全部商机 三处 ★ 行数必须相等）；**首次发现** = 历史上第一次见到（沉淀账本，不随重扫重置）——两者不一致是正常的；★ 口径唯一权威在 `report-xlsx.js`
   - P1/P2 Sheet **只放窗口内活跃商机**（避免历史行稀释销售工作清单）；历史行只在「全部商机」+ 批次历史 Sheet
   - 账本在 `output/history/`（gitignore 内，derived data）；落地逻辑见 `scripts/lib/history.js`
 - `search_mode`（incremental / full）现在**只控制数据抓取口径**，不再影响报告范围。

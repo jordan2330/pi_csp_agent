@@ -608,19 +608,7 @@ async function phase3_report(isFull) {
   hist.archived.forEach(t => { (archivedByApi[t.apiName || '其他'] = archivedByApi[t.apiName || '其他'] || []).push(t); });
   Object.entries(archivedByApi).forEach(([api, rows]) => { results[api] = [...(results[api] || []), ...rows]; });
   if (hist.archived.length) log(`归档行并入: ${hist.archived.length} 条（缓存里已不存在的历史商机）`);
-  log(`沉淀账本: 累计 ${hist.total} 条商机 | 本次首见 ${hist.newCount} 条 | 本批次标记新增 ${newCount} 条`);
-
-  const srcCount = {};
-  allTrials.forEach(t => { srcCount[t.source] = (srcCount[t.source] || 0) + 1; });
-  let cdeStat = { total: 0, signals: 0 };
-  try {
-    const cdeProducts = Object.values(cdeClassify.loadCache().products || {});
-    cdeStat = { total: cdeProducts.length, signals: cdeProducts.filter(e => e.confidence === 'high').length };
-  } catch (_) {}
-  historyLib.appendRun({
-    run: runStamp(), date: todayStr, new: newCount, total: totalLeads,
-    archived: hist.archived.length, sources: srcCount, enrich: { cde_products: cdeStat.total, cde_signals: cdeStat.signals }
-  });
+  log(`沉淀账本: 累计 ${hist.total} 条商机 | 本批次首见 ${hist.newCount} 条 | 快照对比新增 ${newCount} 条记录（含已过窗口、按 API 复计；★ 口径见下方 Excel 统计）`);
 
   const { snapshot, snapFile } = snapshotLib.saveSnapshot({
     fda, results, totalLeads, todayStr, runsDir: RUNS_DIR,
@@ -629,11 +617,16 @@ async function phase3_report(isFull) {
   });
   log(`快照已保存: ${snapFile}`);
 
-  // ── Excel（主交付物：销售可直接筛选/透视）──
+  // ── Excel（唯一交付物：累积视图 + ★ 高亮）──
+  // ★ 口径由渲染器统一计算并写批次档案（单一权威）；此处只传 run 元数据
   try {
     const xlsxLib = require(path.join(__dirname, 'lib', 'report-xlsx.js'));
-    const r = await xlsxLib.generateWorkbook(snapshot, scenario, isFull);
-    log(`Excel 已生成: ${r.xlsxPath} （累积 ${r.rows} 行 / 本次新增 ${r.newRows} 条；P1-口服固体 ${r.p1} 条 / P2-其他剂型 ${r.p2} 条）`);
+    const r = await xlsxLib.generateWorkbook(snapshot, scenario, isFull, {
+      run: runStamp(), date: todayStr, new_records: newCount
+    });
+    log(`Excel 已生成: ${r.xlsxPath}`);
+    log(`累积 ${r.rows} 行（窗口内活跃 ${r.activeRows} / 历史沉淀 ${r.rows - r.activeRows}）| ★ 本次新增 ${r.newRows} 行（P1 ${r.p1} + P2 ${r.p2} 全部可见）`);
+    if (r.newOutWin) log(`另有 ${r.newOutWin} 条新发现但已过时间窗（历史沉淀：不标 ★，仅「全部商机」）`);
   } catch (e) {
     log(`Excel 生成失败: ${e.message}（如缺依赖请执行 npm i 安装 exceljs）`);
   }

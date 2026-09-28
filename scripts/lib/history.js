@@ -137,15 +137,3 @@ function stats() {
 }
 
 module.exports = { key, apply, loadLedger, loadRuns, appendRun, backfill, stats };
-
-if (require.main === module) {
-  const args = process.argv.slice(2);
-  if (args.includes('--backfill')) {
-    const r = backfill();
-    console.log(`回填完成: 新增 ${r.added} 条记录（来自 ${r.files} 份快照）| 账本总计 ${r.total} 条`);
-  }
-  const s = stats();
-  console.log(`账本: ${s.total} 条商机 | 来源 ${JSON.stringify(s.bySource)}`);
-  console.log(`按首次发现批次: ${JSON.stringify(s.byBatch)}`);
-  console.log(`运行批次: ${s.runs} 次${s.lastRun ? `（最近 ${s.lastRun.run} 新增 ${s.lastRun.new}）` : ''}`);
-}

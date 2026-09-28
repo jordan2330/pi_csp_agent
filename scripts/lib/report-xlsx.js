@@ -107,7 +107,10 @@ function flattenTrials(ctx, scope = 'all') {
         contactEmail: t.contactEmail || '',
         contactAddress: t.contactAddress || '',
         source: t.source || '',
-        star: t.isNew ? '★' : '',
+        // ★ 口径：相对上一次运行的新增【且在时间窗内】。
+        // 已过窗口/已归档的行不标 ★（P1/P2 有意不放它们，标 ★ 会造成"工作清单外的新增"假象）
+        star: (t.isNew && t.inWindow !== false && !t.archived) ? '★' : '',
+        _isNewRaw: !!t.isNew,             // 原始新增（不看窗口）→ 概览统计"新增但已过窗口"
         firstSeen: t.first_seen || '',
         windowState: t.archived ? '已归档' : (t.inWindow === false ? '已过窗口' : '窗口内'),
         _sponsorCount: api.sponsorCount,
@@ -127,6 +130,7 @@ function flattenTrials(ctx, scope = 'all') {
     cur._trialCount = Math.max(cur._trialCount, r._trialCount);
     if (r.drugName.length > cur.drugName.length) cur.drugName = r.drugName;
     if (r.star) cur.star = '★';
+    if (r._isNewRaw) cur._isNewRaw = true;
     if (r.firstSeen && (!cur.firstSeen || r.firstSeen < cur.firstSeen)) cur.firstSeen = r.firstSeen;
     if (cur.windowState !== '窗口内' && r.windowState === '窗口内') cur.windowState = '窗口内';
     if (!cur.regClass && r.regClass) cur.regClass = r.regClass;
@@ -229,6 +233,7 @@ function buildOverviewSheet(wb, ctx, rows, isFull, allRows) {
   const kv = (k, v) => ws.addRow([k, v]);
 
   const newCount = totalRows.filter(r => r.star === '★').length;
+  const newOutWin = totalRows.filter(r => r._isNewRaw && r.windowState !== '窗口内').length;
   const histCount = totalRows.filter(r => r.windowState !== '窗口内').length;
   title(ctx.config.title);
   ws.addRow(['生成日期', ctx.today]);
@@ -236,14 +241,15 @@ function buildOverviewSheet(wb, ctx, rows, isFull, allRows) {
   ws.addRow(['交付视图', '累积（全量沉淀 + 本次新增高亮）—— 数据随每次运行累加，不随本次增量删减']);
   const runRow = ws.addRow(['本批次时间', latestRunLabel()]);
   runRow.font = { bold: true };
-  const newRow = ws.addRow(['★ 本次新增', `${newCount} 条（浅绿底 + ★ 列，可用首行筛选快速查看）`]);
+  const newRow = ws.addRow(['★ 本次新增', `${newCount} 条（浅绿底 + ★ 列，可用首行筛选快速查看）＝ P1 + P2 中的 ★ 行数（去重口径，仅窗口内）`]);
   newRow.getCell(2).font = { bold: true, color: { argb: 'FFC00000' } };
   ws.addRow(['累计商机', `${totalRows.length} 行（本表统计口径 = 窗口内活跃 ${rows.length} 行 + 历史沉淀 ${histCount} 行）`]);
+  if (newOutWin) ws.addRow(['新增但已过窗口', `${newOutWin} 条（本批次抓到但登记日期在窗口外，属历史沉淀：不标 ★、只进「全部商机」）`]);
   ws.addRow(['历史沉淀位置', '已过窗口 / 已归档的行只在「全部商机」Sheet（P1/P2 只放窗口内活跃商机，避免稀释工作清单）']);
   ws.addRow([]);
 
   title('图例（怎么看这张表）');
-  kv('★ 本次新增', '相对上一次运行新发现的商机；整行浅绿底，下一批次自动恢复常规配色');
+  kv('★ 本次新增', '相对上一次运行新发现**且在时间窗内**的商机；整行浅绿底，下一批次自动恢复常规配色。已过窗口的新发现不标 ★（历史沉淀行）');
   kv('首次发现', '这条商机历史上第一次被发现的批次日期（不随重扫/缓存重置而改变）');
   kv('窗口状态', `窗口内 = 在 ${ctx.config.lookback_years || 2} 年时间窗内（P1/P2 只放窗口内）；已过窗口 / 已归档 = 历史沉淀行（仅在「全部商机」）`);
   kv('批次历史', '每次运行的 时间 / 新增 / 累计 —— 见「批次历史」Sheet');
@@ -253,9 +259,9 @@ function buildOverviewSheet(wb, ctx, rows, isFull, allRows) {
   title('总览');
   kv('FDA 亚硝胺风险 API', ctx.snap.fda_data.total_apis);
   kv('中国有临床试验的 API', ctx.apisWithLeadsCount);
-  kv('商机条目（去重后试验数）', rows.length);
-  kv('按 API 计条目（同一试验命中多个 API 会重复计）', isFull ? ctx.totalLeads : ctx.totalNewLeads);
-  kv('本次新增', ctx.totalNewLeads);
+  kv('商机条目（去重后试验数，窗口内）', rows.length);
+  kv('按 API 计条目（同一试验命中多个 API 会重复计）', ctx.totalLeads);
+  kv('本次新增（按 API 计，复计口径）', ctx.totalNewLeads);
   kv('涉及企业/机构', ctx.allSponsorsGlobalSize);
   kv('数据源', `CDT ${ctx.cdtCount} 条（含联系方式 ${ctx.cdtWithContact}）/ CT.gov ${ctx.ctgovCount} 条（含联系方式 ${ctx.ctgovWithContact}）`);
   ws.addRow([]);
@@ -394,11 +400,34 @@ function buildApiSheet(wb, ctx, isFull) {
 
 // ── 主入口 ──
 // 累积视图：每次都出全量 + 本次新增高亮（★ + 浅绿底）；P1/P2 仅窗口内活跃商机
-function generateWorkbook(snapshot, scenario, isFull) {
+// runMeta = { run, date, new_records }（来自 pipeline）；★ 口径由渲染器统一计算并写入批次档案，
+// 保证「批次历史的 本次新增」=「表里的 ★ 行数」——**单一权威，避免两处实现漂移**
+function generateWorkbook(snapshot, scenario, isFull, runMeta = {}) {
   const ctx = buildLeadModel(snapshot, scenario, isFull);
   const activeRows = flattenTrials(ctx, 'active');    // 窗口内 → P1/P2
   const allRows = flattenTrials(ctx, 'all');          // 累积全量 → 全部商机
   const newRows = allRows.filter(r => r.star === '★').length;
+  const newOutWin = allRows.filter(r => r._isNewRaw && r.windowState !== '窗口内').length;
+
+  // 批次档案（★ 口径；记录级新增由 pipeline 传入）
+  try {
+    const hist = require('./history');
+    const srcCount = {};
+    Object.values(ctx.enrichedApis).forEach(a => [...a.trials, ...(a.historyTrials || [])]
+      .forEach(t => { srcCount[t.source] = (srcCount[t.source] || 0) + 1; }));
+    let cdeStat = { total: 0, signals: 0 };
+    try {
+      const cdeProducts = Object.values(require('./cde-classify').loadCache().products || {});
+      cdeStat = { total: cdeProducts.length, signals: cdeProducts.filter(e => e.confidence === 'high').length };
+    } catch (_) {}
+    hist.appendRun({
+      run: runMeta.run || `${ctx.today} (重建)`, date: runMeta.date || ctx.today,
+      new: newRows, new_records: runMeta.new_records != null ? runMeta.new_records : newRows,
+      total: allRows.length, total_active: activeRows.length,
+      archived: allRows.filter(r => r.windowState === '已归档').length,
+      sources: srcCount, enrich: { cde_products: cdeStat.total, cde_signals: cdeStat.signals }
+    });
+  } catch (_) { /* runs.json 不可写时不影响交付物 */ }
 
   const wb = new ExcelJS.Workbook();
   wb.creator = 'pi_csp_agent';
@@ -417,9 +446,11 @@ function generateWorkbook(snapshot, scenario, isFull) {
   return wb.xlsx.writeFile(xlsxPath).then(() => ({
     xlsxPath,
     rows: allRows.length,
+    activeRows: activeRows.length,
     p1: activeRows.filter(r => r.osd).length,
     p2: activeRows.filter(r => !r.osd).length,
-    newRows
+    newRows,
+    newOutWin
   }));
 }
 
@@ -428,8 +459,10 @@ function buildBatchSheet(wb) {
   const cols = [
     { key: 'run', header: '运行批次（本地时间）', width: 22 },
     { key: 'date', header: '日期', width: 12 },
-    { key: 'new', header: '本次新增', width: 10 },
-    { key: 'total', header: '当时商机总数', width: 12 },
+    { key: 'new', header: '★ 新增(窗口内)', width: 12 },
+    { key: 'newRecords', header: '抓取新增(全部)', width: 12 },
+    { key: 'total', header: '累计商机行(全部)', width: 13 },
+    { key: 'totalActive', header: '窗口内活跃', width: 11 },
     { key: 'cumulative', header: '账本累计', width: 10 },
     { key: 'archived', header: '归档行', width: 9 },
     { key: 'ctgov', header: 'CT.gov 条', width: 10 },
@@ -452,7 +485,8 @@ function buildBatchSheet(wb) {
   runs.slice(-100).forEach(r => {
     const e = r.enrich || {};
     const row = ws.addRow({
-      run: r.run, date: r.date, new: r.new, total: r.total, cumulative: '',
+      run: r.run, date: r.date, new: r.new, newRecords: r.new_records != null ? r.new_records : r.new,
+      total: r.total, totalActive: r.total_active != null ? r.total_active : '', cumulative: '',
       archived: r.archived || 0,
       ctgov: (r.sources || {})['CT.gov'] || 0,
       cdt: (r.sources || {})['CDT'] || 0,
