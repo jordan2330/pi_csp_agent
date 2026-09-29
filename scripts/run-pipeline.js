@@ -527,7 +527,7 @@ async function phase2b_cdt(allApis, isFull) {
 // ══════════════════════════════════════════════════
 async function phase2c_nmpaEnrich() {
   log('');
-  log('═══ Phase 2c: 法规分类富化（注册分类/一致性评价）═══');
+  log('═══ Phase 2c: 分类证据富化（只留 CDE 官方实锤）═══');
 
   // 2c-1: CDE 官方受理品种信息（主数据源，免费、一手）
   const cdeCfg = cdeClassify.loadConfig();
