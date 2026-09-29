@@ -321,7 +321,8 @@ function buildOverviewSheet(wb, ctx, rows, isFull, allRows) {
 
   title('药物分类分布');
   const classCount = {};
-  rows.forEach(r => { classCount[r.drugClass] = (classCount[r.drugClass] || 0) + 1; });
+  // 空白分类 → '未取得证据'（否则统计行会出现无标签的行）
+  rows.forEach(r => { const c = r.drugClass || '未取得证据'; classCount[c] = (classCount[c] || 0) + 1; });
   Object.entries(classCount).sort((a, b) => b[1] - a[1]).forEach(([c, n]) => kv(c, `${n} 条 (${fmtPct(n, rows.length)})`));
   ws.addRow([]);
 
