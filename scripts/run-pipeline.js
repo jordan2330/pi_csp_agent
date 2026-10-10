@@ -617,19 +617,39 @@ async function phase3_report(isFull) {
   });
   log(`快照已保存: ${snapFile}`);
 
-  // ── Excel（唯一交付物：累积视图 + ★ 高亮）──
-  // ★ 口径由渲染器统一计算并写批次档案（单一权威）；此处只传 run 元数据
+  // ── 交付层：同步智能表格（唯一交付物，累积视图 + ★ 标记 + 销售反馈沉淀）──
+  // ★ 口径由 wecom-sheet 统一计算并写批次档案（单一权威）；此处只传 run 元数据
   try {
-    const xlsxLib = require(path.join(__dirname, 'lib', 'report-xlsx.js'));
-    const r = await xlsxLib.generateWorkbook(snapshot, scenario, isFull, {
+    const syncLib = require(path.join(__dirname, 'lib', 'wecom-sheet.js'));
+    const r = await syncLib.sync(snapshot, scenario, isFull, {
       run: runStamp(), date: todayStr, new_records: newCount
     });
-    log(`Excel 已生成: ${r.xlsxPath}`);
-    log(`累积 ${r.rows} 行（窗口内活跃 ${r.activeRows} / 历史沉淀 ${r.rows - r.activeRows}）| ★ 本次新增 ${r.newRows} 行（P1 ${r.p1} + P2 ${r.p2} 全部可见）`);
-    if (r.newOutWin) log(`另有 ${r.newOutWin} 条新发现但已过时间窗（历史沉淀：不标 ★，仅「全部商机」）`);
+    log(`智能表格已同步: ${r.url}`);
+    log(`累积 ${r.rows} 行（窗口内活跃 ${r.activeRows} / 历史沉淀 ${r.rows - r.activeRows}）| 本批次表内新增 ${r.added} 行 / 更新 ${r.updated} 行 | ★ 窗口内新增 ${r.newRows} 行（P1 ${r.p1} + P2 ${r.p2}）`);
+    if (r.fbChanges) log(`销售反馈：${r.fbChanges} 条变化已入账（output/history/feedback.json）`);
+    if (r.newOutWin) log(`另有 ${r.newOutWin} 条新发现但已过时间窗（保留在表内，窗口状态=已过窗口）`);
     log(r.violations ? `⚠️ 列一致性自检: ${r.violations} 处矛盾（见上方 stderr）` : `列一致性自检: 通过（分类/证据列无矛盾组合）`);
+    await notifyGroup(r);
   } catch (e) {
-    log(`Excel 生成失败: ${e.message}（如缺依赖请执行 npm i 安装 exceljs）`);
+    log(`智能表格同步失败: ${e.message}`);
+  }
+}
+
+// 群机器人推送（配置了 WECOM_WEBHOOK_KEY 才发；失败不影响同步）
+async function notifyGroup(r) {
+  try {
+    const wecom = require(path.join(__dirname, 'lib', 'wecom.js'));
+    wecom.loadEnv();
+    if (!process.env.WECOM_WEBHOOK_KEY) return;
+    const lines = [
+      `**CSP 商机更新 ${todayStr}**`,
+      `★ 本次新增 <font color="info">${r.newRows}</font> 条（窗口内）ー 窗口内活跃 ${r.activeRows} 条`,
+      `> [打开商机表](${r.url})`
+    ];
+    await wecom.webhook.send(lines.join('\n'));
+    log('群推送已发送');
+  } catch (e) {
+    log(`群推送失败（不影响同步）: ${e.message}`);
   }
 }
 
@@ -700,7 +720,9 @@ async function main() {
   log(`║ Pipeline 完成! 总耗时: ${mins} 分钟`);
   log(`║ CT.gov: ${ctgovStats.done} APIs, ${ctgovStats.totalStudies} fetched, ${ctgovStats.unchangedApis} 无变化, ${ctgovStats.totalNew || 0} 新增, ${ctgovStats.errors} errors`);
   log(`║ CDT:    ${cdtStats.done} APIs, ${cdtStats.totalTrials} new, ${cdtStats.skippedNoNew} 无新增, ${cdtStats.errors} errors`);
-  log(`║ 交付物: ${scenarioConfig.report_xlsx || 'output/CSP_Leads_Report.xlsx'}`);
+  let sheetUrl = '';
+  try { sheetUrl = JSON.parse(fs.readFileSync(path.join(WS, 'config', 'wecom.json'), 'utf8')).url || ''; } catch (_) {}
+  log(`║ 交付物: 智能表格 ${sheetUrl || '(未初始化，先跑 node scripts/wecom-sync.js init)'}`);
   log('╚══════════════════════════════════════╝');
 }
 

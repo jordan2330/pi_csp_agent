@@ -95,12 +95,9 @@ pi
 ## 查看产出物
 
 ```bash
-# 主交付物 — 销售用的 Excel（OSD 优先分组 + 自动筛选 + 可透视）
-ls -la output/CSP_Leads_Report.xlsx
-
-
-# Markdown — 文本存档（pi 读它做摘要）
-cat output/CSP_Leads_Report.md
+# 主交付物 — 企微智能表格「CSP商机跟踪」（同一链接，销售收藏后永远看到最新全量）
+node scripts/wecom-sync.js status   # 表格链接 + 记录数 + 反馈统计
+node scripts/wecom-sync.js feedback # 销售反馈账本摘要
 
 # 运行快照 — 每次运行的完整数据，用于增量对比
 ls output/runs/
@@ -109,22 +106,17 @@ ls output/runs/
 cat config/fda_nitrosamines.json | python3 -m json.tool | head -20
 ```
 
-### Excel 结构（主交付物）
+### 智能表格结构（主交付物，v5.0.0 起取代 Excel）
 
-| Sheet | 内容 | 用法 |
-|---|---|---|
-| 概览 | 统计 + 优先级说明 + **数据局限** | 先看这张 |
-| P1-口服固体 | OSD（含改良释放/颗粒散剂），**按 AI limit Cat 1→5 分段**，段内企业数降序、进行中试验优先 | 销售主战场：Cat 1 排最前 |
-| P2-其他剂型 | 非 OSD，同样按 Cat 分段 | 次优先 |
-| 全部商机 | 扁平表（**一行 = 一条试验，已按登记号去重**，23 列） | 数据透视 / 图表 |
-| 按API汇总 | 一行 = 一个 API（试验数/企业数/OSD 数/推荐方案） | 管理视角 |
+- **一行 = 一条商机**（“商机键”= 来源|登记号，已去重）；**行永不删除**，历史行用「窗口状态」列（窗口内/已过窗口/已归档）过滤
+- **字段**：旧 Excel 27 列全映射 + `分组`（P1-口服固体/P2-其他剂型）+ `风险等级`（Cat1-5 带色）+ `详情链接`（可跳转）+ 反馈 4 列 + 系统留痕 4 列
+- **视图**（在表格 UI 建，一次）：P1-口服固体 / P2-其他剂型 / ★本次新增 / 我的待跟进（按负责人=我）/ 全部商机 / 按API汇总
+- **销售反馈**：「跟进状态」（待跟进/跟进中/已联系/不感兴趣/已转化）+「负责人」（@人，自动通知）+「跟进备注」+「跟进日期」—— 销售独占写，pipeline 永不覆盖（`update_records` 字段级合并）；每次同步拉回，落 `output/history/feedback.json` 事件流
+- **操作留痕**：表格内建「创建人/创建时间/最后编辑人/最后编辑时间」列自动记录谁何时改了哪行
 
-**优先度**：OSD+Cat1 → OSD+Cat2/3/4/5 → 其他剂型+Cat1/2/3/4/5（Sheet 顺序即优先级）。
+**优先度**：P1（OSD）按 Cat 1→5 优先，其次 P2（其他剂型）同样分段。**分组与风险等级是两个独立列**，表内筛选/分组视图即可组合。
 
 **去重与关联**：同一试验若命中多个 API（如复方制剂），只出一行，用「涉及API(含Cat)」列列出全部关联 API，**风险等级取其中最高**（Cat 数最小）。
-
-**药物分类口径**：分类按**产品级**统一（同一产品名只要有一次 BE/一致性评价证据 → 全部记为仿制药；非原研企业的上市后 IV 期试验亦记为仿制药），避免同药多口径。
-需要「OSD+Cat1」单独视图？在 P1 sheet 用「风险等级」列筛选即可（首行已开自动筛选），不需要拆成 10 张 sheet。
 
 **CSP 推荐方案按剂型给出候选组合**（依据 CSP 产品选型准则：**包装形态优先**），例如：
 
@@ -136,9 +128,9 @@ cat config/fda_nitrosamines.json | python3 -m json.tool | head -20
 | 透皮贴剂/柔性包装 | Activ-Film® | 包装形态 |
 | 注射/气雾剂 | 标注「低相关/需评估」，不再硬塞产品 | — |
 
-**报告字段**：★ 本次新增（浅绿高亮）、首次发现（历史批次）、窗口状态（窗口内/已过窗口/已归档）、涉及API、药物分类与注册分类（**只来自 CDE 官方受理记录，未取得证据留空、不做推断**）、分类依据（CDE 受理数据·产品级/品种级）、产品名称（CDT 中文商品名 / CT.gov 干预名）、剂型（⭐口服固体加粗）、药物分类（仿制药/原研药/新药/新药（改良型）/观察性研究）、企业联系方式（联系人/电话/邮箱/地址）、试验状态、登记号与日期、来源（CDT/CT.gov）、本次是否新增。
+**报告字段**：★ 本次新增（checkbox）、首次发现（历史批次）、窗口状态（窗口内/已过窗口/已归档）、涉及API、药物分类与注册分类（**只来自 CDE 官方受理记录，未取得证据留空、不做推断**）、分类依据（CDE 受理数据·产品级/品种级）、产品名称（CDT 中文商品名 / CT.gov 干预名）、剂型（⭐口服固体）、企业联系方式（联系人/电话/邮箱/地址）、试验状态、登记号（可点详情链接）、登记日期、来源（CDT/CT.gov）、跟进反馈 4 列。
 
-**模式差异**：增量模式下两个交付物（xlsx/md）**都只含新增商机**（Excel sheet 名带 `新增-` 前缀）；全量模式才含完整列表。
+**模式差异**：`search_mode` 只控制**数据抓取口径**（全量重搜 or 增量续搜），不影响交付范围——智能表格永远是**累积视图**（全量沉淀 + ★ 本次新增标识）。
 
 ### 全量搜索（首次部署）
 
@@ -332,16 +324,19 @@ pi-csp-agent/
 │   ├── run-pipeline.js                # ★ 主入口：场景感知瘦编排器（CT.gov + CDT + 报告）
 │   ├── launch-chrome.sh               # 启动 Windows 侧真实 Chrome（CDP 9223）
 │   ├── reset-and-search.sh            # 从零全量重置脚本
+│   ├── wecom-sync.js                  # 智能表格运维 CLI（init/status/feedback/checkip）
+│   ├── wecom-poc.js                   # 企微 PoC 验证工具
 │   └── lib/                           # 通用层（跨场景复用）
 │       ├── sources.js                 # CT.gov REST + CDT 浏览器采集
 │       ├── cde-classify.js            # CDE 受理品种信息 → 注册分类证据（官方一手，免费）
 │       ├── enrichment.js              # 剂型检测 / 产品名抽取
 │       ├── snapshot.js                # 快照 + 增量检测
-│       ├── report.js                  # Markdown 渲染器
-│       └── report-xlsx.js             # Excel(5 sheet) 渲染器
+│       ├── report.js                  # 数据模型（buildLeadModel + flattenTrials）
+│       ├── wecom.js                   # 企微 API 客户端（智能表格 + 群机器人）
+│       └── wecom-sheet.js             # 智能表格同步器（唯一交付层，38 字段）
 ├── prompts/lead-scan.md               # 入口命令 /lead-scan <scenario>
 └── output/
-    ├── history/                       # 沉淀账本（ledger.json + runs.json，gitignore 内）
+    ├── history/                       # 账本（ledger/feedback/runs，gitignore 内）
     └── runs/                          # 运行快照（增量对比用）
 ```
 

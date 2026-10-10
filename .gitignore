@@ -27,7 +27,7 @@ output/CSP_Leads_Report.xlsx
 config/cde_class_cache.json
 
 # 企微智能表格运行时资源（docid / token 缓存，本地生成）
-config/wecom.json
+config/wecom*.json
 config/.wecom_token.json
 output/history/
 .tmp/

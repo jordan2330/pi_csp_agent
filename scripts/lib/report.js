@@ -335,5 +335,153 @@ function buildLeadModel(snapshot, scenario, isFull) {
   return ctx;
 }
 
+// 进行中/可介入的试验状态优先（销售时机信号）
+const ACTIVE_STATUS = /进行中|招募|尚未招募|未招募|not yet recruiting|recruiting|active, not recruiting|enrolling/i;
+
+// ── 把 model 变成"一行 = 一条商机"的扁平记录（交付层通用，原在 report-xlsx.js）──
+// 同一试验（source + 登记号）可能命中多个 API（如复方制剂同时命中两个 API），
+// 此处合并为一行，用「涉及API」列标注全部关联 API，风险等级取其中最高（Cat 最小）。
+// scope='active' → 只取窗口内活跃商机（P1/P2 用）；scope='all' → 累积全量（全部商机用，含历史行）
+function flattenTrials(ctx, scope = 'all') {
+  const raw = [];
+  let seq = 0;
+  const apiEntries = Object.values(ctx.enrichedApis);
+  apiEntries.forEach(api => {
+    const trials = scope === 'active' ? api.trials : [...api.trials, ...(api.historyTrials || [])];
+    trials.forEach(t => {
+      seq++;
+      raw.push({
+        // 无登记号时用自增键，避免被误合并
+        key: t.regNo ? `${t.source}|${t.regNo}` : `__no_regno_${seq}`,
+        apiCn: api.name_cn || api.name_en,
+        apiEn: api.name_en,
+        catNum: api.potency_category,
+        aiLimit: api.ai_limit,
+        csp: api.csp_recommendation || '',
+        confirm: api.csp_confirm || '',
+        sponsor: t.sponsor || '',
+        drugName: t.drugName || '',
+        dosageForm: t.dosageForm || '',
+        drugClass: t.drugClassification || '',       // 空 = 未取得实锤证据（不推断）
+        classBasis: t.classBasis || '',
+        regClass: (t.nmpa && t.nmpa.regClass) || '',
+        status: t.status || '',
+        indication: t.indication || t.briefTitle || '',
+        phase: t.phase || '',
+        regNo: t.regNo || '',
+        regDate: t.regDate || '',
+        contactName: t.contactName || '',
+        contactPhone: t.contactPhone || '',
+        contactEmail: t.contactEmail || '',
+        contactAddress: t.contactAddress || '',
+        source: t.source || '',
+        // ★ 口径：相对上一次运行的新增【且在时间窗内】。
+        // 已过窗口/已归档的行不标 ★（P1/P2 有意不放它们，标 ★ 会造成"工作清单外的新增"假象）
+        star: (t.isNew && t.inWindow !== false && !t.archived) ? '★' : '',
+        _isNewRaw: !!t.isNew,             // 原始新增（不看窗口）→ 概览统计"新增但已过窗口"
+        firstSeen: t.first_seen || '',
+        windowState: t.archived ? '已归档' : (t.inWindow === false ? '已过窗口' : '窗口内'),
+        _sponsorCount: api.sponsorCount,
+        _trialCount: api.trialCount,
+        _apis: [{ cn: api.name_cn || api.name_en, cat: api.potency_category }]
+      });
+    });
+  });
+
+  // ── 合并同一试验的重复行 ──
+  const merged = new Map();
+  for (const r of raw) {
+    const cur = merged.get(r.key);
+    if (!cur) { merged.set(r.key, r); continue; }
+    cur._apis.push(...r._apis);
+    cur._sponsorCount = Math.max(cur._sponsorCount, r._sponsorCount);
+    cur._trialCount = Math.max(cur._trialCount, r._trialCount);
+    if (r.drugName.length > cur.drugName.length) cur.drugName = r.drugName;
+    if (r.star) cur.star = '★';
+    if (r._isNewRaw) cur._isNewRaw = true;
+    if (r.firstSeen && (!cur.firstSeen || r.firstSeen < cur.firstSeen)) cur.firstSeen = r.firstSeen;
+    if (cur.windowState !== '窗口内' && r.windowState === '窗口内') cur.windowState = '窗口内';
+    // 药物分类 / 分类依据 / 注册分类 **必须成套取**（v4.2.0：只留 CDE 官方实锤，无证据留空）：
+    // 同一试验命中多个 API 时各 API 证据可能不同，逐列独立取会产出矛盾组合。
+    // 规则：按证据强度（产品级 > 品种级）挑一条子行，成套搬运这 3 个字段。
+    const BASIS_RANK = { 'CDE 受理数据（产品级）': 0, 'CDE 受理数据（品种级）': 1 };
+    const rank = (r2) => {
+      const b = BASIS_RANK[r2.classBasis] != null ? BASIS_RANK[r2.classBasis] : 3;
+      return (r2.nmpaLevel === 'product' ? 0 : 10) + b;   // 产品级证据（精确命中试验产品）最强
+    };
+    if (rank(r) < rank(cur)) {
+      cur.drugClass = r.drugClass; cur.classBasis = r.classBasis;
+      cur.regClass = r.regClass; cur.nmpaLevel = r.nmpaLevel;
+    }
+    if (!cur.regClass && r.regClass) cur.regClass = r.regClass;
+    // 剂型取能识别到的那个（不同 API 的提取结果可能不同）
+    const curOk = cur.dosageForm && cur.dosageForm !== '未识别';
+    const rOk = r.dosageForm && r.dosageForm !== '未识别';
+    if (!curOk && rOk) cur.dosageForm = r.dosageForm;
+    // 取最高风险等级：同时采用该 API 的推荐方案
+    if (r.catNum < cur.catNum) {
+      Object.assign(cur, { catNum: r.catNum, apiCn: r.apiCn, apiEn: r.apiEn, aiLimit: r.aiLimit, csp: r.csp, confirm: r.confirm });
+    }
+  }
+
+  const rows = [...merged.values()].map(r => {
+    const isOsd = isOralSolid(r.dosageForm);
+    const seen = new Set();
+    const related = r._apis
+      .filter(a => { const k = a.cn; if (seen.has(k)) return false; seen.add(k); return true; })
+      .sort((a, b) => a.cat - b.cat || String(a.cn).localeCompare(String(b.cn)))
+      .map(a => `${a.cn}(Cat${a.cat})`)
+      .join(' / ');
+    return {
+      ...r,
+      osd: isOsd,
+      cat: `Cat ${r.catNum}`,
+      priority: isOsd ? `P1-OSD-Cat${r.catNum}` : `P2-其他-Cat${r.catNum}`,
+      relatedApis: related,
+      dosageForm: r.dosageForm || '未识别'
+    };
+  });
+
+  // ── 不变量自检（列间逻辑一致性）──
+  // 目的：新增列时最容易被漏掉的"成套语义"问题，交给机器每次检查，别再靠人眼发现
+  const violations = [];
+  const ALLOWED_BASIS = new Set(['CDE 受理数据（产品级）', 'CDE 受理数据（品种级）', '']);
+  for (const r of rows) {
+    const basis = r.classBasis || '';
+    const cls = r.drugClass || '';
+    if (!ALLOWED_BASIS.has(basis)) violations.push([r.key, `分类依据取值非法（应为 CDE 受理数据产品级/品种级或空）: ${basis}`]);
+    if (cls && !basis) violations.push([r.key, `药物分类「${cls}」却没有证据出处`]);
+    if (!cls && basis) violations.push([r.key, `有证据出处「${basis}」却没有药物分类`]);
+    // 注册分类 ↔ 药物分类 必须一致（只校验无歧义码）
+    if (basis && r.regClass) {
+      const code = String(r.regClass);
+      const want = /^1(\.|$)/.test(code) ? '新药'
+        : /^2/.test(code) ? '新药（改良型）'
+          : /^(4|5\.2|3\.3|原6)$/.test(code) ? '仿制药'
+            : /^5\.1$/.test(code) ? '原研药' : null;
+      if (want && cls !== want) violations.push([r.key, `注册分类 ${code} 应配「${want}」但实为「${cls}」`]);
+    }
+    if (r.regClass && !basis) violations.push([r.key, `注册分类 ${r.regClass} 却没有证据出处`]);
+  }
+
+  // 排序：OSD 优先 → Cat 升序 → 段内企业数降序 → 进行中优先 → 登记日期降序
+  rows.sort((a, b) => {
+    if (a.osd !== b.osd) return a.osd ? -1 : 1;
+    if (a.catNum !== b.catNum) return a.catNum - b.catNum;
+    if (b._sponsorCount !== a._sponsorCount) return b._sponsorCount - a._sponsorCount;
+    const aAct = ACTIVE_STATUS.test(a.status) ? 0 : 1;
+    const bAct = ACTIVE_STATUS.test(b.status) ? 0 : 1;
+    if (aAct !== bAct) return aAct - bAct;
+    return String(b.regDate).localeCompare(String(a.regDate));
+  });
+  if (violations.length) {
+    console.error(`⚠️ 分类/证据列一致性自检发现 ${violations.length} 处矛盾（前 5 条）：`);
+    violations.slice(0, 5).forEach(([k, msg]) => console.error(`   - ${k}: ${msg}`));
+    console.error('   → 请检查 report.js 的 classBasis 判定与合并规则是否同步');
+  }
+  rows.violations = violations;
+  return rows;
+}
+
 // ── Markdown 渲染 ──
-module.exports = { buildLeadModel };
+module.exports = { buildLeadModel, flattenTrials, ACTIVE_STATUS };

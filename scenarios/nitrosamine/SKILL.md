@@ -1,6 +1,6 @@
 ---
 name: nitrosamine
-description: 亚硝胺药物商机发掘场景。从FDA页面抓取亚硝胺杂质风险API列表，在chinadrugtrials和ClinicalTrials.gov双源搜索相关临床试验，匹配客户画像并生成含企业联系方式和CSP产品推荐的商机报告。当需要执行亚硝胺相关的商机发掘时使用此 skill。
+description: 亚硝胺药物商机发掘场景。从FDA页面抓取亚硝胺杂质风险API列表，在chinadrugtrials和ClinicalTrials.gov双源搜索相关临床试验，匹配客户画像并同步到企微智能表格（含企业联系方式、CSP产品推荐与销售反馈沉淀）。当需要执行亚硝胺相关的商机发掘时使用此 skill。
 ---
 
 # 亚硝胺商机发掘场景
@@ -11,7 +11,7 @@ description: 亚硝胺药物商机发掘场景。从FDA页面抓取亚硝胺杂�
 
 1. **Phase 1**: FDA 数据采集（仅首次运行或缓存过期时，通过浏览器抓取 FDA 页面）
 2. **Phase 2**: 双源搜索（CT.gov REST API + CDT 浏览器脚本）→ **Phase 2c 分类富化**（CDE 官方受理数据为主 + 博查兜底）—— **由 `run-pipeline.js` 自动执行**
-3. **Phase 3**: 快照生成 + 报告生成 —— **由 `run-pipeline.js` 自动执行**
+3. **Phase 3**: 快照生成 + 智能表格同步（交付物） —— **由 `run-pipeline.js` 自动执行**
 
 ## 前置条件
 
@@ -19,6 +19,8 @@ description: 亚硝胺药物商机发掘场景。从FDA页面抓取亚硝胺杂�
 - **Windows 侧真实 Chrome 已启动**（专用 profile，CDP 端口 9223）：`bash scripts/launch-chrome.sh`（已在运行则直接返回）
 - WSL 为 mirrored 网络模式（`.wslconfig` → `networkingMode=mirrored`），且 playwright 库已安装（`skills/browser_executor/scripts/` 下 `npm i`）
 - `DASHSCOPE_API_KEY` 已配置
+- **企微自建应用已配置**（交付物为智能表格，v5.0.0 起取代 Excel）：`.env` 填 `WECOM_CORPID`/`WECOM_SECRET`（模板见 `.env.example`）；管理后台已做三件事：创建自建应用、把应用加入「协作-文档-API】可调用接口的应用」、把运行环境出口 IP 加入应用「企业可信IP」
+- 首次运行前先初始化表格：`node scripts/wecom-sync.js init`（幂等）；换网络/IP 变动报 60020 时跑 `node scripts/wecom-sync.js checkip` 查出需加白名单的 IP
 - 原因：CDT 已启用瑞数动态安全（JS 质询 + 指纹检测），headless/自动化浏览器会被拦，必须用真实 Chrome
 
 ---
@@ -37,7 +39,7 @@ description: 亚硝胺药物商机发掘场景。从FDA页面抓取亚硝胺杂�
 
 - **`"full"`**（全量模式）：重置所有 API 的搜索状态（CT.gov 缓存与 CDT 游标），重新搜索两个数据源，完成后自动改回 `"incremental"`
 - **`"incremental"`**（增量模式，默认）：每次运行仍遍历全部 API，但只增量拉取新增数据——CT.gov 每次全拉并与缓存 NCT ID 对比检测新增；CDT 用 `last_cdt_regno` 游标续搜，遇旧数据自动停止翻页
-- **注意**：`search_mode` 只控制**数据抓取口径**，不影响报告范围。Excel 永远是"累积视图"（见 Phase 3）
+- **注意**：`search_mode` 只控制**数据抓取口径**，不影响交付范围。智能表格永远是"累积视图"（见 Phase 3）
 
 ### 2. 检查 FDA 缓存
 
@@ -257,26 +259,24 @@ tail -20 output/runs/pipeline.log
 - **归属判定**：API 级证据只在"试验药物就是该品种"时套用（否则亚叶酸钙出现在双抗化疗方案里会被误判为仿制）
 - 证据缺失时不改判（回落规则推断），只补信息
 - 缓存 `config/nmpa_class_cache.json`（含 `rules_version`，规则升级即失效重查）；单次预算 `max_queries_per_run`（默认 100 次），超出跳过并记 errors.log
-- 输出四列进 Excel：**分类依据 / 注册分类 / 一致性评价 / 证据来源**；概览有"法规分类证据（Phase 2c）"+"药物分类依据"统计段
-  - `分类依据` 四值语义：**官方证据(CDE)**（标签与 CDE 官方受理数据一致，可查证）/ **搜索证据**（与博查证据一致）/ **规则（证据不适用）**（该品种有证据，但按原研企业/代码号排除）/ **规则推断**（无可用证据）
-  - `证据来源` 列：CDE → `CDE 官方`；博查 → 证据域名（如 nbd.com.cn）；**证据存在但未采用**时加后缀 `（未采用）`（避免"规则（证据不适用）‖ CDE 官方"读起来自相矛盾）
-  - **列必须成套取**（`report-xlsx.js` flattenTrials）：药物分类 / 分类依据 / 注册分类 / 一致性评价 / 证据来源 是一组，同一试验命中多个 API 时按证据强度（官方证据 > 搜索证据 > 规则（证据不适用）> 规则推断）挑**一条子行整体搬运**；**禁止逐列独立取**（会出现"分类依据=规则推断 + 证据来源=CDE 官方"这类矛盾组合）
+- 输出进智能表格：**分类依据 / 注册分类**（取值语义见下方 Phase 3「分类语义」）；概览无 Excel 版统计段，统计以「按API汇总」视图代替
+  - **列必须成套取**（`report.js` flattenTrials）：药物分类 / 分类依据 / 注册分类 是一组，同一试验命中多个 API 时按证据强度（产品级 > 品种级）挑**一条子行整体搬运**；**禁止逐列独立取**（会出现"有分类无依据"这类矛盾组合）
   - **不变量自检**：`flattenTrials` 每次生成都校验列间一致性（规则推断不得有证据来源、官方证据来源必须是 CDE…），有矛盾即 stderr 报警并在 pipeline 日志显示"列一致性自检: N 处矛盾"；新增列**必须同步更新合并规则与自检**
   - 优先级要点：**仿制证据 > 名称启发式**——缓释/复方既可能是 2 类改良型，也可能是原研缓释/复方产品的 4 类仿制（如盐酸他喷他多缓释片），名称本身分不出来
 
-#### Phase 3: 快照 + 沉淀账本 + Excel（累积视图 · 只留实锤）
+#### Phase 3: 快照 + 沉淀账本 + 智能表格同步（累积视图 · 只留实锤）
 - **增量检测：对比前次快照标记 isNew；同日二次运行对比当天已有快照,避免重复汇报新增**
 - 从 `config/fda_nitrosamines.json` 生成快照到 `output/runs/YYYY-MM-DD.json`
-- **沉淀账本（`scripts/lib/history.js`）**：`output/history/ledger.json`（每条商机 first_seen/last_seen，重扫不重置）+ `runs.json`（批次档案，由渲染器写入以保证 ★ 口径单一权威）；缓存里消失的历史行以 `archived:true` 并入快照
-- **交付物只有 `output/CSP_Leads_Report.xlsx`**（Markdown 已移除），6 个 sheet：
-  | Sheet | 内容 |
-  |---|---|
-  | 概览 | 本批次信息 + 图例（★/首次发现/窗口状态）+ 分类证据覆盖 + 数据局限 |
-  | P1-口服固体 / P2-其他剂型 | **仅窗口内**活跃商机，按 Cat 1→5 分段；★ 行浅绿底 |
-  | 全部商机 | **累积全量**（含已过窗口/已归档）|
-  | 按API汇总 | 一行 = 一个 API（试验数/本次新增/历史行数/企业数/OSD 数/推荐方案）|
-  | 批次历史 | 一行 = 一次运行（★新增/抓取新增/累计/窗口内活跃）+ 账本按首次发现批次累计 |
-
+- **沉淀账本（`scripts/lib/history.js`）**：`output/history/ledger.json`（每条商机 first_seen/last_seen，重扫不重置）+ `runs.json`（批次档案，由 `wecom-sheet.js sync` 写入以保证 ★ 口径单一权威）；缓存里消失的历史行以 `archived:true` 并入快照
+- **交付物 = 企微智能表格「CSP商机跟踪」**（`scripts/lib/wecom-sheet.js`，v5.0.0 起取代 Excel；销售收藏一个链接，永远看到最新全量）
+  - **首次初始化**（一次性，幂等）：`node scripts/wecom-sync.js init` —— 创建智能表格 + 38 字段（含反馈 4 列、系统留痕 4 列），docid 存 `config/wecom.json`（gitignore）；建好后把销售加为可编辑协作者（`members` 逻辑见 `scripts/wecom-poc.js`，或直接在企微里分享）
+  - **每次运行自动同步**（Phase 3 尾部，`sync()`）：新商机 `add_records`；已有行**只写变化的字段**（`update_records` 字段级合并——PoC 已验证，**反馈列永不被 pipeline 覆盖**）；★ 行 checkbox 置位；行永不删除（已过窗口/已归档行保留，用「窗口状态」列过滤）
+  - **销售反馈沉淀**：销售在表格里点选「跟进状态/负责人/跟进备注/跟进日期」→ 每次同步时拉回，变化写入 `output/history/feedback.json` 事件流（谁/何时/改了什么）；配合表格内建的「最后编辑人/最后编辑时间」双留痕
+  - **群推送**：配置 `WECOM_WEBHOOK_KEY` 后，每次运行自动推送摘要卡片（★新增数 + 表格链接）到销售群
+  - **视图**（在表格 UI 里建，一次）：P1-口服固体 / P2-其他剂型 / ★本次新增 / 我的待跟进（按负责人=我）/ 全部商机；对应旧 Excel 的 6 个 Sheet
+  - **IP 运维**：企微直连（国内域名不走代理）出口 IP 会随家宽重拨变化；报 `60020 not allow to access from your ip` 时跑 `node scripts/wecom-sync.js checkip` 取出新 IP，加入管理后台「企业可信IP」（分号分隔，上限 120，可多填）
+- **字段结构**（对应旧 Excel 27 列的全映射 + 增强）：`优先级` 拆为 `分组`（P1/P2 单选）+ `风险等级`（Cat1-5 单选带色）；新增 `商机键`（source|regNo，join 键）、`详情链接`（可点击跳转，URL 字段）；`窗口状态`/`来源` 为单选；**反馈 4 列**与**系统 4 列**见上
+- **改字段必须同步四处**（与旧 Excel 四处规则同构）：① `wecom-sheet.js` 的 `SCHEMA` ② `rowValues` 构建 ③ `scalarOf` 比较规则（新字段类型必须加 case，否则每次运行都会重复 update）④ 不变量自检（`report.js flattenTrials`，新增列须同步合并规则与自检）
 - **分类语义（v4.2.0 收紧：只留实锤，不做推断）**
   - `药物分类` / `注册分类` / `分类依据` **只来自 CDE 官方受理记录**；**未取得证据一律留空，不做任何推断**（宁可留空让销售人工核对）
   - `分类依据` 取值只有两个：`CDE 受理数据（产品级）`（试验产品精确命中某条受理记录，最可靠）/ `CDE 受理数据（品种级）`（仅查到该品种，非该产品）；无证据 → 空

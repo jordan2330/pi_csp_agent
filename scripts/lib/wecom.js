@@ -111,6 +111,7 @@ const sheet = {
   getFields: (docid, sheetId) => api('/wedoc/smartsheet/get_fields', { docid, sheet_id: sheetId }),
   addFields: (docid, sheetId, fields) => api('/wedoc/smartsheet/add_fields', { docid, sheet_id: sheetId, fields }),
   updateFields: (docid, sheetId, fields) => api('/wedoc/smartsheet/update_fields', { docid, sheet_id: sheetId, fields }),
+  deleteFields: (docid, sheetId, fieldIds) => api('/wedoc/smartsheet/delete_fields', { docid, sheet_id: sheetId, field_ids: fieldIds }),
   /** 单次 ≤500 行（官方建议）；超出自动分批 */
   addRecords: (docid, sheetId, records) => batchCall('/wedoc/smartsheet/add_records', docid, sheetId, records, 500),
   updateRecords: (docid, sheetId, records) => batchCall('/wedoc/smartsheet/update_records', docid, sheetId, records, 500),
@@ -151,8 +152,15 @@ async function batchCall(pathname, docid, sheetId, records, size) {
 
 // ── 群机器人推送（webhook key 认证，不占可信 IP、零管理后台配置）──
 const webhook = {
-  async send(content, { key = process.env.WECOM_WEBHOOK_KEY, msgtype = 'markdown' } = {}) {
+  async send(content, { key, msgtype = 'markdown' } = {}) {
+    loadEnv();
+    key = key || process.env.WECOM_WEBHOOK_KEY;
     if (!key) throw new Error('缺少 WECOM_WEBHOOK_KEY（.env 或参数）');
+    // 兼容直接粘贴完整 webhook URL（?key=xxx）的情况
+    if (/^https?:/.test(key)) {
+      const m = key.match(/[?&]key=([^&\s]+)/);
+      if (m) key = m[1];
+    }
     const res = await fetch(`${QYAPI}/webhook/send?key=${key}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ msgtype, [msgtype]: { content } }), signal: AbortSignal.timeout(15000)
