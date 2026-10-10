@@ -2,18 +2,22 @@
 /**
  * 智能表格同步 CLI（交付层运维工具）
  *
- * 用法：node scripts/wecom-sync.js <命令>
- *   init       创建正式智能表格（CSP商机跟踪）+ 全字段（一次性；幂等）
- *   status     打印当前表状态（字段数 / 记录数 / 反馈统计）
- *   feedback   导出反馈账本摘要（output/history/feedback.json）
- *   checkip    换网络/IP 漂移后自检（报 60020 时告诉你该把哪个 IP 加白名单）
+ * 用法：node scripts/wecom-sync.js <命令> [参数]
+ *   init              创建正式智能表格（CSP商机跟踪）+ 全字段（一次性；幂等）
+ *   sync [场景=nitrosamine]  用 output/runs/ 最新快照手动同步一次（排查/补跑用；日常由 pipeline 自动调）
+ *   status            打印当前表状态（字段数 / 记录数 / 反馈统计）
+ *   feedback          导出反馈账本摘要（output/history/feedback.json）
+ *   checkip           换网络/IP 漂移后自检（报 60020 时告诉你该把哪个 IP 加白名单）
  *
  * 日常同步不经过本 CLI：pipeline（scripts/run-pipeline.js）每次运行自动 sync。
  */
 
+const fs = require('fs');
 const path = require('path');
 const W = require(path.join(__dirname, 'lib', 'wecom.js'));
 const S = require(path.join(__dirname, 'lib', 'wecom-sheet.js'));
+
+const WS = path.resolve(__dirname, '..');
 
 const log = (...a) => console.log(...a);
 
@@ -21,6 +25,25 @@ async function cmdInit() {
   const c = await S.initSheet();
   log(`docid=${c.docid}`);
   log(`sheet_id=${c.sheet_id}`);
+}
+
+async function cmdSync(scenarioName = 'nitrosamine') {
+  const runsDir = path.join(WS, 'output', 'runs');
+  const files = fs.readdirSync(runsDir).filter(f => /^\d{4}-\d{2}-\d{2}\.json$/.test(f)).sort();
+  const latest = files[files.length - 1];
+  if (!latest) throw new Error('output/runs/ 下无快照 —— 先跑一次 pipeline');
+  const snap = JSON.parse(fs.readFileSync(path.join(runsDir, latest), 'utf8'));
+  const scenarioDir = path.join(WS, 'scenarios', scenarioName);
+  const config = JSON.parse(fs.readFileSync(path.join(scenarioDir, 'scenario.json'), 'utf8'));
+  const hooks = require(path.join(scenarioDir, 'enrich.js'));
+  log(`用快照 ${latest} 同步（场景 ${scenarioName}）...`);
+  const now = new Date();
+  const r = await S.sync(snap, { name: scenarioName, dir: scenarioDir, config, hooks }, false, {
+    run: `${now.toISOString().slice(0, 16).replace('T', ' ')} (手动)`,
+    date: now.toISOString().slice(0, 10)
+  });
+  log(`表内新增 ${r.added} 行 / 更新 ${r.updated} 行 | 累积 ${r.rows} 行（窗口内 ${r.activeRows}）| ★ ${r.newRows} | 反馈变化 ${r.fbChanges} 条`);
+  log(`表格: ${r.url}`);
 }
 
 async function cmdStatus() {
@@ -58,9 +81,9 @@ async function cmdCheckIp() {
   }
 }
 
-const CMDS = { init: cmdInit, status: cmdStatus, feedback: cmdFeedback, checkip: cmdCheckIp };
-const [cmd] = process.argv.slice(2);
+const CMDS = { init: cmdInit, sync: cmdSync, status: cmdStatus, feedback: cmdFeedback, checkip: cmdCheckIp };
+const [cmd, ...args] = process.argv.slice(2);
 (async () => {
-  if (!CMDS[cmd]) { log('用法: node scripts/wecom-sync.js <init|status|feedback>'); process.exitCode = 1; return; }
-  try { await CMDS[cmd](); } catch (e) { console.error(`\n❌ ${e.message}`); process.exitCode = 1; }
+  if (!CMDS[cmd]) { log('用法: node scripts/wecom-sync.js <init|sync|status|feedback|checkip> [场景]'); process.exitCode = 1; return; }
+  try { await CMDS[cmd](...args); } catch (e) { console.error(`\n❌ ${e.message}`); process.exitCode = 1; }
 })();

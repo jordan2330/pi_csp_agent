@@ -204,9 +204,10 @@ async function initSheet(docName = DEFAULT_DOC_NAME) {
   const others = def.filter(f => f.field_type !== 'FIELD_TYPE_TEXT');
   try {
     if (texts.length) {
-      await W.sheet.updateFields(docid, sheetId, [{ field_id: texts[0].field_id, field_title: '商机键' }]);
+      // update_fields 必须带 field_type（缺了报 2022010 invalid field type）
+      await W.sheet.updateFields(docid, sheetId, [{ field_id: texts[0].field_id, field_title: '商机键', field_type: texts[0].field_type }]);
       if (others.length) await W.sheet.deleteFields(docid, sheetId, others.map(f => f.field_id));
-      log(`默认字段已处理：复用 1 个文本字段为「商机键」，删除 ${others.length} 个默认字段`);
+      log(`默认字段已处理：主字段改名为「商机键」，删除 ${others.length} 个默认字段`);
     }
   } catch (e) {
     log(`⚠️ 默认字段自动清理失败（${e.message}）——请在表格 UI 里手动删除「文本/单选/人员/数字/日期」等默认列`);
@@ -218,6 +219,14 @@ async function initSheet(docName = DEFAULT_DOC_NAME) {
     await W.sheet.addFields(docid, sheetId, missing);
     log(`已添加 ${missing.length} 个字段`);
   }
+  // 新建表自带几条空记录 → 清掉（只删主键为空的，安全）
+  try {
+    const empties = (await W.sheet.getRecords(docid, sheetId)).filter(r => !W.plain(r.values?.['商机键']));
+    if (empties.length) {
+      await W.sheet.deleteRecords(docid, sheetId, empties.map(r => r.record_id));
+      log(`已清理 ${empties.length} 条默认空记录`);
+    }
+  } catch (_) { /* 清理失败不影响使用 */ }
   W.writeCfg({ docid, sheet_id: sheetId, url, official: true, created_at: new Date().toISOString() });
   log(`✅ 正式表就绪: ${url}`);
   return { docid, sheet_id: sheetId, url };
