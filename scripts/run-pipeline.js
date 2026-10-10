@@ -608,7 +608,7 @@ async function phase3_report(isFull) {
   hist.archived.forEach(t => { (archivedByApi[t.apiName || '其他'] = archivedByApi[t.apiName || '其他'] || []).push(t); });
   Object.entries(archivedByApi).forEach(([api, rows]) => { results[api] = [...(results[api] || []), ...rows]; });
   if (hist.archived.length) log(`归档行并入: ${hist.archived.length} 条（缓存里已不存在的历史商机）`);
-  log(`沉淀账本: 累计 ${hist.total} 条商机 | 本批次首见 ${hist.newCount} 条 | 快照对比新增 ${newCount} 条记录（含已过窗口、按 API 复计；★ 口径见下方 Excel 统计）`);
+  log(`沉淀账本: 累计 ${hist.total} 条商机 | 本批次首见 ${hist.newCount} 条 | 快照对比新增 ${newCount} 条记录（含已过窗口、按 API 复计；★ 口径由交付层统一计算）`);
 
   const { snapshot, snapFile } = snapshotLib.saveSnapshot({
     fda, results, totalLeads, todayStr, runsDir: RUNS_DIR,
