@@ -270,13 +270,14 @@ tail -20 output/runs/pipeline.log
 - **沉淀账本（`scripts/lib/history.js`）**：`output/history/ledger.json`（每条商机 first_seen/last_seen，重扫不重置）+ `runs.json`（批次档案，由 `wecom-sheet.js sync` 写入以保证 ★ 口径单一权威）；缓存里消失的历史行以 `archived:true` 并入快照
 - **交付物 = 企微智能表格「CSP商机跟踪」**（`scripts/lib/wecom-sheet.js`，v5.0.0 起取代 Excel；销售收藏一个链接，永远看到最新全量）
   - **首次初始化**（一次性，幂等）：`node scripts/wecom-sync.js init` —— 创建智能表格 + 38 字段（含反馈 4 列、系统留痕 4 列），docid 存 `config/wecom.json`（gitignore）；建好后把销售加为可编辑协作者（`members` 逻辑见 `scripts/wecom-poc.js`，或直接在企微里分享）
-  - **每次运行自动同步**（Phase 3 尾部，`sync()`）：新商机 `add_records`；已有行**只写变化的字段**（`update_records` 字段级合并——PoC 已验证，**反馈列永不被 pipeline 覆盖**）；★ 行 checkbox 置位；行永不删除（已过窗口/已归档行保留，用「窗口状态」列过滤）
+  - **每次运行自动同步**（Phase 3 尾部，`sync()`）：新商机 `add_records`；已有行**只写变化的字段**（`update_records` 字段级合并——PoC 已验证，**反馈列永不被 pipeline 覆盖**）；★ 行 checkbox 置位
+  - **表内容口径（v5.0.0-rc.2）**：**表 = 窗口内活跃商机 ∪ 有反馈的线索**（销售跟过的不消失）；出窗口且无反馈 / 归档行自动 `delete_records` 移出表（本地账本留档全量）。归档行仅有账本元信息（无联系方式/剂型），对销售无价值——2026-10-10 审计：243 条归档行联系方式覆盖 0%
   - **销售反馈沉淀**：销售在表格里点选「跟进状态/负责人/跟进备注/跟进日期」→ 每次同步时拉回，变化写入 `output/history/feedback.json` 事件流（谁/何时/改了什么）；配合表格内建的「最后编辑人/最后编辑时间」双留痕
   - **群推送**：配置 `WECOM_WEBHOOK_KEY` 后，每次运行自动推送摘要卡片（★新增数 + 表格链接）到销售群
-  - **视图**（在表格 UI 里建，一次）：P1-口服固体 / P2-其他剂型 / ★本次新增 / 我的待跟进（按负责人=我）/ 全部商机；对应旧 Excel 的 6 个 Sheet
+  - **单 sheet 设计**（不需要视图）：字段顺序即销售阅读顺序，改用 `node scripts/wecom-sync.js reorder` 重建（add_fields 前插，倒序添加）；排序/筛选按需在表内临时用（视图过滤）
   - **IP 运维**：企微直连（国内域名不走代理）出口 IP 会随家宽重拨变化；报 `60020 not allow to access from your ip` 时跑 `node scripts/wecom-sync.js checkip` 取出新 IP，加入管理后台「企业可信IP」（分号分隔，上限 120，可多填）
-- **字段结构**（对应旧 Excel 27 列的全映射 + 增强）：`优先级` 拆为 `分组`（P1/P2 单选）+ `风险等级`（Cat1-5 单选带色）；新增 `商机键`（source|regNo，join 键）、`详情链接`（可点击跳转，URL 字段）；`窗口状态`/`来源` 为单选；**反馈 4 列**与**系统 4 列**见上
-- **改字段必须同步四处**（与旧 Excel 四处规则同构）：① `wecom-sheet.js` 的 `SCHEMA` ② `rowValues` 构建 ③ `scalarOf` 比较规则（新字段类型必须加 case，否则每次运行都会重复 update）④ 不变量自检（`report.js flattenTrials`，新增列须同步合并规则与自检）
+- **字段结构**（对应旧 Excel 27 列的全映射 + 增强，共 37 列）：顺序 = ① 判断价值（分组/风险等级/★/API/ALI）→ ② 客户与联系（企业/产品/剂型/联系人/电话/邮箱/地址）→ ③ 方案与依据（CSP方案/待确认/药物分类/注册分类/分类依据/试验状态/分期/适应症）→ ④ 反馈 4 列 → ⑤ 溯源（登记号/链接/日期/首次发现/窗口状态/来源）→ ⑥ 系统 4 列（最右）。`优先级` 拆为 `分组`（P1/P2 单选）+ `风险等级`（Cat1-5 单选带色）；新增 `商机键`（source|regNo，主字段/join 键）、`详情链接`（可点击跳转，URL 字段）
+- **改字段必须同步四处**（与旧 Excel 四处规则同构）：① `wecom-sheet.js` 的 `SCHEMA`（含顺序）② `rowValues` 构建 ③ `scalarOf` 比较规则（新字段类型必须加 case，否则每次运行都会重复 update）④ 不变量自检（`report.js flattenTrials`，新增列须同步合并规则与自检）；新增/重排字段后跑 `node scripts/wecom-sync.js reorder`（会清空数据列，随后 `sync` 回填）
 - **分类语义（v4.2.0 收紧：只留实锤，不做推断）**
   - `药物分类` / `注册分类` / `分类依据` **只来自 CDE 官方受理记录**；**未取得证据一律留空，不做任何推断**（宁可留空让销售人工核对）
   - `分类依据` 取值只有两个：`CDE 受理数据（产品级）`（试验产品精确命中某条受理记录，最可靠）/ `CDE 受理数据（品种级）`（仅查到该品种，非该产品）；无证据 → 空

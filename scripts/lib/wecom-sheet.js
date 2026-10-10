@@ -1,6 +1,11 @@
 /**
  * 智能表格同步器 —— 唯一交付物（v5.0.0 起取代 Excel）
  *
+ * 表内容口径（v5.0.0-rc.2，单 sheet 工作清单）：
+ *   **表 = 窗口内活跃商机 ∪ 有反馈的线索**（销售跟过的不消失）
+ *   已过窗口 / 已归档行**不进表**（归档行仅有账本元信息、无联系方式，对销售无价值；
+ *   本地账本 ledger.json / 快照仍保留全量记录）——出窗口且无反馈的行会被删除
+ *
  * 数据流（每次 pipeline 运行一次 sync）：
  *   1. buildLeadModel + flattenTrials → 一行 = 一条商机（含首见/窗口/★ 标记）
  *   2. get_records 全表拉取 → {商机键: record} 映射
@@ -30,42 +35,48 @@ const DEFAULT_DOC_NAME = 'CSP商机跟踪';
 // ── 选项（文本与颜色；写入/比较都以 text 为准，id 运行时从字段定义取）──
 const CAT_TEXT = { 1: 'Cat1-极高风险', 2: 'Cat2-高风险', 3: 'Cat3-中高风险', 4: 'Cat4-中风险', 5: 'Cat5-低风险' };
 const sel = (text, style) => ({ text, style });
+// 字段顺序 = 销售视角（从左到右阅读顺序）：① 判断价值 ② 客户与联系 ③ 方案与依据 ④ 反馈（销售填） ⑤ 溯源 ⑥ 系统列（最右，最后）
+// 注意：add_fields 为前插，重排需按期望顺序倒序添加（见 wecom-sync.js reorder）
 const SCHEMA = [
-  { field_title: '商机键', field_type: 'FIELD_TYPE_TEXT' },
-  { field_title: '★本次新增', field_type: 'FIELD_TYPE_CHECKBOX' },
+  { field_title: '商机键', field_type: 'FIELD_TYPE_TEXT' },   // 主字段（不可删，内容=source|regNo）
+  // ① 判断价值（前 7 列，销售第一眼）
   { field_title: '分组', field_type: 'FIELD_TYPE_SINGLE_SELECT', property_single_select: { options: [sel('P1-口服固体', 12), sel('P2-其他剂型', 9)] } },
   { field_title: '风险等级', field_type: 'FIELD_TYPE_SINGLE_SELECT', property_single_select: { options: Object.values(CAT_TEXT).map((t, i) => sel(t, [18, 20, 21, 16, 9][i])) } },
+  { field_title: '★本次新增', field_type: 'FIELD_TYPE_CHECKBOX' },
   { field_title: '主要API(中文)', field_type: 'FIELD_TYPE_TEXT' },
   { field_title: '主要API(英文)', field_type: 'FIELD_TYPE_TEXT' },
   { field_title: '涉及API(含Cat)', field_type: 'FIELD_TYPE_TEXT' },
   { field_title: 'AI Limit', field_type: 'FIELD_TYPE_TEXT' },
+  // ② 客户与联系方式（销售要打电话）
   { field_title: '申请人/企业', field_type: 'FIELD_TYPE_TEXT' },
   { field_title: '产品名称', field_type: 'FIELD_TYPE_TEXT' },
   { field_title: '剂型', field_type: 'FIELD_TYPE_TEXT' },
-  { field_title: '药物分类', field_type: 'FIELD_TYPE_TEXT' },
-  { field_title: '分类依据', field_type: 'FIELD_TYPE_TEXT' },
-  { field_title: '注册分类', field_type: 'FIELD_TYPE_TEXT' },
+  { field_title: '联系人', field_type: 'FIELD_TYPE_TEXT' },
+  { field_title: '电话', field_type: 'FIELD_TYPE_TEXT' },
+  { field_title: '邮箱', field_type: 'FIELD_TYPE_TEXT' },
+  { field_title: '地址', field_type: 'FIELD_TYPE_TEXT' },
+  // ③ 推荐方案与判断依据
   { field_title: '推荐CSP方案', field_type: 'FIELD_TYPE_TEXT' },
   { field_title: '待确认', field_type: 'FIELD_TYPE_TEXT' },
+  { field_title: '药物分类', field_type: 'FIELD_TYPE_TEXT' },
+  { field_title: '注册分类', field_type: 'FIELD_TYPE_TEXT' },
+  { field_title: '分类依据', field_type: 'FIELD_TYPE_TEXT' },
   { field_title: '试验状态', field_type: 'FIELD_TYPE_TEXT' },
-  { field_title: '适应症/试验题目', field_type: 'FIELD_TYPE_TEXT' },
   { field_title: '分期', field_type: 'FIELD_TYPE_TEXT' },
+  { field_title: '适应症/试验题目', field_type: 'FIELD_TYPE_TEXT' },
+  // ④ 反馈列（销售独占写；放在销售操作区）
+  { field_title: '跟进状态', field_type: 'FIELD_TYPE_SINGLE_SELECT', property_single_select: { options: [sel('待跟进', 9), sel('跟进中', 12), sel('已联系', 16), sel('不感兴趣', 18), sel('已转化', 19)] } },
+  { field_title: '负责人', field_type: 'FIELD_TYPE_USER', property_user: { is_multiple: false, is_notified: true } },
+  { field_title: '跟进备注', field_type: 'FIELD_TYPE_TEXT' },
+  { field_title: '跟进日期', field_type: 'FIELD_TYPE_DATE_TIME', property_date_time: { format: 'yyyy-mm-dd' } },
+  // ⑤ 溯源
   { field_title: '登记号/NCT', field_type: 'FIELD_TYPE_TEXT' },
   { field_title: '详情链接', field_type: 'FIELD_TYPE_URL', property_url: { type: 'LINK_TYPE_ICON_TEXT' } },
   { field_title: '登记日期', field_type: 'FIELD_TYPE_DATE_TIME', property_date_time: { format: 'yyyy-mm-dd' } },
   { field_title: '首次发现', field_type: 'FIELD_TYPE_DATE_TIME', property_date_time: { format: 'yyyy-mm-dd' } },
   { field_title: '窗口状态', field_type: 'FIELD_TYPE_SINGLE_SELECT', property_single_select: { options: [sel('窗口内', 16), sel('已过窗口', 21), sel('已归档', 9)] } },
-  { field_title: '联系人', field_type: 'FIELD_TYPE_TEXT' },
-  { field_title: '电话', field_type: 'FIELD_TYPE_TEXT' },
-  { field_title: '邮箱', field_type: 'FIELD_TYPE_TEXT' },
-  { field_title: '地址', field_type: 'FIELD_TYPE_TEXT' },
   { field_title: '来源', field_type: 'FIELD_TYPE_SINGLE_SELECT', property_single_select: { options: [sel('CT.gov', 3), sel('CDT', 5)] } },
-  // ── 反馈列（销售独占，pipeline 永不写）──
-  { field_title: '跟进状态', field_type: 'FIELD_TYPE_SINGLE_SELECT', property_single_select: { options: [sel('待跟进', 9), sel('跟进中', 12), sel('已联系', 16), sel('不感兴趣', 18), sel('已转化', 19)] } },
-  { field_title: '负责人', field_type: 'FIELD_TYPE_USER', property_user: { is_multiple: false, is_notified: true } },
-  { field_title: '跟进备注', field_type: 'FIELD_TYPE_TEXT' },
-  { field_title: '跟进日期', field_type: 'FIELD_TYPE_DATE_TIME', property_date_time: { format: 'yyyy-mm-dd' } },
-  // ── 系统列（表格自动维护，操作留痕）──
+  // ⑥ 系统列（表格自动维护，最右）
   { field_title: '创建人', field_type: 'FIELD_TYPE_CREATED_USER' },
   { field_title: '创建时间', field_type: 'FIELD_TYPE_CREATED_TIME', property_created_time: { format: 'yyyy-mm-dd hh:mm' } },
   { field_title: '最后编辑人', field_type: 'FIELD_TYPE_MODIFIED_USER' },
@@ -258,9 +269,15 @@ async function sync(snapshot, scenario, isFull, meta = {}) {
   const fbChanges = pullFeedback(records);
   if (fbChanges.length) log(`销售反馈：${fbChanges.length} 条变化已入账（feedback.json）`);
 
+  // ── 表内容口径：窗口内 ∪ 有反馈（销售跟过的线索不消失）；其余（出窗口/归档）移出表 ──
+  const recHasFeedback = (rec) => !!(W.plain(rec.values?.['跟进状态']) || W.plain(rec.values?.['跟进备注']) || (rec.values?.['负责人'] || []).length);
+  const feedbackKeys = new Set([...existing.entries()].filter(([, rec]) => recHasFeedback(rec)).map(([k]) => k));
+  const keep = rows.filter(r => r.windowState === '窗口内' || feedbackKeys.has(r.key));
+  const keepKeys = new Set(keep.map(r => r.key));
+
   // ── upsert：新键 add；已有键只写变化字段（反馈列永不写）──
   const toAdd = [], toUpdate = [];
-  for (const row of rows) {
+  for (const row of keep) {
     const desired = rowValues(row, byTitle);
     const cur = existing.get(row.key);
     if (!cur) { toAdd.push({ values: desired }); continue; }
@@ -271,10 +288,14 @@ async function sync(snapshot, scenario, isFull, meta = {}) {
     }
     if (Object.keys(diff).length) toUpdate.push({ record_id: cur.record_id, values: diff });
   }
-  // 表内存在但本批次 rows 里没有的 ★ 行（理论上不会：rows 含全量）——保留不动，避免误清
+
+  // ── 清理：表里有但不在保留集的记录（出窗口且无反馈 / 归档行）→ 删除（本地账本留档）──
+  const toDelete = [...existing.entries()].filter(([k]) => !keepKeys.has(k)).map(([, rec]) => rec.record_id);
 
   const added = toAdd.length ? (await W.sheet.addRecords(cfg.docid, cfg.sheet_id, toAdd)).length : 0;
   const updated = toUpdate.length ? (await W.sheet.updateRecords(cfg.docid, cfg.sheet_id, toUpdate)).length : 0;
+  const deleted = toDelete.length ? (await W.sheet.deleteRecords(cfg.docid, cfg.sheet_id, toDelete), toDelete.length) : 0;
+  if (deleted) log(`移出表: ${deleted} 行（已过窗口且无反馈 / 归档行；本地账本仍保留）`);
 
   // ── 批次档案（runs.json，口径与原 Excel 版一致）──
   try {
@@ -297,12 +318,13 @@ async function sync(snapshot, scenario, isFull, meta = {}) {
 
   return {
     url: cfg.url,
-    rows: rows.length,
-    activeRows: activeRows.length,
-    p1: activeRows.filter(r => r.osd).length,
-    p2: activeRows.filter(r => !r.osd).length,
+    rows: keep.length,
+    activeRows: keep.filter(r => r.windowState === '窗口内').length,
+    outOfScope: rows.length - keep.length,
+    p1: keep.filter(r => r.windowState === '窗口内' && r.osd).length,
+    p2: keep.filter(r => r.windowState === '窗口内' && !r.osd).length,
     newRows, newOutWin,
-    added, updated, fbChanges: fbChanges.length,
+    added, updated, deleted, fbChanges: fbChanges.length,
     violations: (rows.violations || []).length
   };
 }

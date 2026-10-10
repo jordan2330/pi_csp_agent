@@ -4,6 +4,7 @@
  *
  * 用法：node scripts/wecom-sync.js <命令> [参数]
  *   init              创建正式智能表格（CSP商机跟踪）+ 全字段（一次性；幂等）
+ *   reorder           按 SCHEMA 顺序重建字段（改字段顺序后用；会清空数据列，需再接 sync）
  *   sync [场景=nitrosamine]  用 output/runs/ 最新快照手动同步一次（排查/补跑用；日常由 pipeline 自动调）
  *   status            打印当前表状态（字段数 / 记录数 / 反馈统计）
  *   feedback          导出反馈账本摘要（output/history/feedback.json）
@@ -46,6 +47,26 @@ async function cmdSync(scenarioName = 'nitrosamine') {
   log(`表格: ${r.url}`);
 }
 
+async function cmdReorder() {
+  const c = W.readCfg();
+  if (!c.docid) throw new Error('尚未初始化，先跑 init');
+  const { fields = [] } = await W.sheet.getFields(c.docid, c.sheet_id);
+  const mainTitle = S.SCHEMA[0].field_title;   // 主字段（不可删）
+  const others = fields.filter(f => f.field_title !== mainTitle);
+  if (others.length) {
+    await W.sheet.deleteFields(c.docid, c.sheet_id, others.map(f => f.field_id));
+    log(`已删除 ${others.length} 个旧字段（数据列清空，随后 sync 回填）`);
+  }
+  // add_fields 为前插 → 按期望顺序倒序添加，使 UI 左→右 = SCHEMA 顺序
+  const ordered = S.SCHEMA.filter(f => f.field_title !== mainTitle).slice().reverse();
+  await W.sheet.addFields(c.docid, c.sheet_id, ordered);
+  const after = (await W.sheet.getFields(c.docid, c.sheet_id)).fields || [];
+  log(`✅ 已按销售视角顺序重建 ${ordered.length} 个字段`);
+  log('当前字段顺序（应即 UI 左→右）: ');
+  log('  ' + after.map(f => f.field_title).join(' → '));
+  log('→ 接着跑：node scripts/wecom-sync.js sync 重新灌入数据');
+}
+
 async function cmdStatus() {
   const c = W.readCfg();
   if (!c.docid) throw new Error('尚未初始化，先跑 init');
@@ -81,9 +102,9 @@ async function cmdCheckIp() {
   }
 }
 
-const CMDS = { init: cmdInit, sync: cmdSync, status: cmdStatus, feedback: cmdFeedback, checkip: cmdCheckIp };
+const CMDS = { init: cmdInit, reorder: cmdReorder, sync: cmdSync, status: cmdStatus, feedback: cmdFeedback, checkip: cmdCheckIp };
 const [cmd, ...args] = process.argv.slice(2);
 (async () => {
-  if (!CMDS[cmd]) { log('用法: node scripts/wecom-sync.js <init|sync|status|feedback|checkip> [场景]'); process.exitCode = 1; return; }
+  if (!CMDS[cmd]) { log('用法: node scripts/wecom-sync.js <init|reorder|sync|status|feedback|checkip> [场景]'); process.exitCode = 1; return; }
   try { await CMDS[cmd](...args); } catch (e) { console.error(`\n❌ ${e.message}`); process.exitCode = 1; }
 })();

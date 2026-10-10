@@ -625,9 +625,9 @@ async function phase3_report(isFull) {
       run: runStamp(), date: todayStr, new_records: newCount
     });
     log(`智能表格已同步: ${r.url}`);
-    log(`累积 ${r.rows} 行（窗口内活跃 ${r.activeRows} / 历史沉淀 ${r.rows - r.activeRows}）| 本批次表内新增 ${r.added} 行 / 更新 ${r.updated} 行 | ★ 窗口内新增 ${r.newRows} 行（P1 ${r.p1} + P2 ${r.p2}）`);
+    log(`表内 ${r.rows} 行（窗口内活跃 ${r.activeRows}：P1 ${r.p1} + P2 ${r.p2}）| 新增 ${r.added} / 更新 ${r.updated} / 移出 ${r.deleted} 行 | ★ 本批次新增 ${r.newRows}`);
     if (r.fbChanges) log(`销售反馈：${r.fbChanges} 条变化已入账（output/history/feedback.json）`);
-    if (r.newOutWin) log(`另有 ${r.newOutWin} 条新发现但已过时间窗（保留在表内，窗口状态=已过窗口）`);
+    if (r.outOfScope) log(`另有 ${r.outOfScope} 行不在表内（已过窗口/归档；本地账本留档，对销售无行动价值）`);
     log(r.violations ? `⚠️ 列一致性自检: ${r.violations} 处矛盾（见上方 stderr）` : `列一致性自检: 通过（分类/证据列无矛盾组合）`);
     await notifyGroup(r);
   } catch (e) {
