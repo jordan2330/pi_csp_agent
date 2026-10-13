@@ -1,8 +1,9 @@
 # Pi CSP Agent — 亚硝胺商机发掘
 
-> ✅ **当前稳定基线：`v3.3-stable`**（代码 v3.3.4，2026-09-23）—— 版本索引与标记约定见 [CHANGELOG.md](CHANGELOG.md)
+> ✅ **当前稳定基线：`v5.0-stable`**（代码 v5.0.0，2026-10-10，分支 v4）—— 版本索引与标记约定见 [CHANGELOG.md](CHANGELOG.md)
+> （v3 分支 = Excel 交付版稳定线 v4.2-stable，继续保留不合并）
 
-基于 [Pi Coding Agent](https://pi.dev) 的 CSP（Aptar 活性包装）销售商机自动发掘系统。Agent 自动抓取 FDA 亚硝胺杂质风险 API 列表，逐一在中国药物临床试验登记平台搜索相关临床试验，匹配客户画像并生成包含 CSP 产品推荐的 Markdown 商机报告。
+基于 [Pi Coding Agent](https://pi.dev) 的 CSP（Aptar 活性包装）销售商机自动发掘系统。Agent 自动抓取 FDA 亚硝胺杂质风险 API 列表，逐一在中国药物临床试验登记平台搜索相关临床试验，匹配客户画像，同步到**企微智能表格**（含 CSP 产品推荐与销售反馈回路）。
 
 ## 架构概览
 
@@ -15,14 +16,16 @@
 │       └─ cdt-search-lib.js + browser.js     │   │  真实指纹 → 能过瑞数质询         │──→ ClinicalTrials.gov
 │                                             │   └────────────────────────────────
 │  数据流: FDA页面 → API列表 → 双源试验搜索     │            ↑
-│         → 客户匹配 → CSP推荐 → Markdown报告   │    mirrored 网络模式
-└─────────────────────────────────────────────┘   (WSL 可访问 Windows 的 127.0.0.1)
+│         → 客户匹配 → CSP推荐 → 分类富化       │    mirrored 网络模式
+│         → 企微智能表格（销售反馈回流）          │ (WSL 可访问 Windows 的 127.0.0.1)
+└─────────────────────────────────────────────┘
 ```
 
 - **Pi** 是大脑：读取 SKILL.md 指令，自主规划并执行
 - **cdt-search-lib.js / browser.js** 是手：通过 CDP 连接 Windows 侧真实 Chrome 操作网页（端点由 `scripts/browser-connect.js` 解析）
 - **为什么必须真浏览器**：chinadrugtrials 已启用瑞数动态安全（JS 质询 + 浏览器指纹检测），headless/自动化浏览器会被拦截；早期用远程 browserless（机房 IP + 自动化指纹）已被封禁
 - **scenarios/** 是业务逻辑：每个场景一个独立 Skill，可插拔
+- **企微智能表格**是唯一交付物（v5.0.0 起）：pipeline 同步；销售在同一链接看到最新线索并填跟进反馈（状态/负责人/备注）→ 每次同步回流 feedback.json 账本
 
 ## 前置要求
 
@@ -30,14 +33,15 @@
 - **Node.js 20+**（当前开发环境 v24）
 - **Windows 侧 Google Chrome**：CDT 反爬（瑞数动态安全）必须用真实浏览器，headless 会被拦截
 - **DashScope API Key**：在 [阿里云百炼](https://bailian.console.aliyun.com/) 创建，模型包括 qwen3.7-max、deepseek-v4-pro、glm-5.2、kimi-k2.6 等
-- **网络**：需能访问 `dashscope.aliyuncs.com`、`fda.gov`、`chinadrugtrials.org.cn`、`clinicaltrials.gov`
+- **企微自建应用（交付物需要，管理员权限）**：① 企业ID + 应用 Secret；② 管理后台「协作 → 文档 → API」把应用加入可调用列表；③ 应用详情页「企业可信IP」加入运行机出口 IPv4（出口 IP 变了报 60020，跑 `node scripts/wecom-sync.js checkip` 查新 IP 加白名单）
+- **网络**：需能访问 `dashscope.aliyuncs.com`、`fda.gov`、`chinadrugtrials.org.cn`、`clinicaltrials.gov`、`qyapi.weixin.qq.com`
 - **一次性配置**：`C:\Users\<你>\.wslconfig` 加入 `networkingMode=mirrored`，然后 `wsl --shutdown` 重启（让 WSL 能访问 Windows 的 `127.0.0.1:9223`）
 
 ## 快速开始
 
 ```bash
-# 1. 克隆仓库
-git clone https://github.com/jordan2330/pi_csp_agent.git
+# 1. 克隆仓库（v4 分支 = v5.0.0 智能表格版；master/v3 是旧 Excel 版）
+git clone -b v4 https://github.com/jordan2330/pi_csp_agent.git
 cd pi_csp_agent
 
 # 2. 安装依赖（只装 playwright 库，不下载浏览器 —— 浏览器用 Windows 上的 Chrome）
@@ -46,17 +50,46 @@ cd skills/browser_executor/scripts && PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm i &
 # 3. 启动 Windows 侧真实 Chrome（专用 profile + CDP 端口 9223；已在运行则秒退）
 bash scripts/launch-chrome.sh
 
-# 4. 配置模型
+# 4. 配置模型（LLM）
 mkdir -p ~/.pi/agent && cp config/models.json ~/.pi/agent/models.json
 export DASHSCOPE_API_KEY=sk-你的key        # 建议写入 ~/.bashrc
 
-# 5. 启动 Pi
+# 5. 配置企微（交付物：智能表格）
+cp .env.example .env                       # 填 WECOM_CORPID / WECOM_SECRET（+可选 WECOM_WEBHOOK_KEY）
+node scripts/wecom-sync.js init            # 创建智能表格（首次部署）
+# 换机/接入已有表见下方「多机部署」—— 绝不能在已有表的机器外盲跑 init
+
+# 6. 启动 Pi
 pi                                        # 交互模式
 /model qwen3.7-max                        # 选择模型
-/lead-scan nitrosamine                    # 启动商机发掘
+/lead-scan nitrosamine                    # 启动商机发掘（首跑为全量，约 3-4 小时）
 ```
 
 > 脚本默认连接 `http://127.0.0.1:9223`（Windows Chrome 的 CDP 端点）。需要指向其他端点（如远程 browserless）时设置 `BROWSER_ENDPOINT=http://...` 或 `ws://...`。
+
+## 多机部署 / 换机迁移
+
+**关键：智能表格的 `docid` 存在本地 `config/wecom.json`（gitignore）**，销售数据和反馈都在这张表里。新机器**绝不能盲跑 `init`**（会创建第二张表，销售看不到）。两种接入方式任选：
+
+```bash
+# 方式 A（推荐）：从旧机器拷一个文件
+#   scp 旧机:pi_csp_agent/config/wecom.json 新机:pi_csp_agent/config/wecom.json
+
+# 方式 B：init 传参（docid 从旧机的 config/wecom.json 里读）
+node scripts/wecom-sync.js init <docid> [url]
+# 也可在 .env 里配 WECOM_DOCID=... WECOM_DOC_URL=... 后直接 node scripts/wecom-sync.js init
+```
+
+迁移清单（按需）：
+
+| 文件 | 必拷? | 说明 |
+|---|---|---|
+| `.env` | **必** | 企微凭证（新旧机器各自配也行） |
+| `config/wecom.json` | **必** | 表格 docid/sheet_id/url（或用方式 B） |
+| `config/fda_nitrosamines.json` | 建议 | 不拷则首跑重新采集 FDA 页（走 Phase 1）+ **CDT 全量重搜（3-4 小时）**；拷了则增量 |
+| `output/history/ledger.json` | 建议 | 不拷则「首次发现」日期从新机首跑日重建 |
+| `config/cde_class_cache.json` | 可选 | 不拷则 CDE 分类证据重查（免费接口，多几分钟） |
+| 企业可信IP | **必（后台）** | 新机器出口 IP 需加入企微管理后台白名单 |
 
 ## 运行模式
 
@@ -127,7 +160,7 @@ cat config/fda_nitrosamines.json | python3 -m json.tool | head -20
 | 透皮贴剂/柔性包装 | Activ-Film® | 包装形态 |
 | 注射/气雾剂 | 标注「低相关/需评估」，不再硬塞产品 | — |
 
-**报告字段**：★ 本次新增（checkbox）、首次发现（历史批次）、窗口状态（窗口内/已过窗口/已归档）、涉及API、药物分类与注册分类（**只来自 CDE 官方受理记录，未取得证据留空、不做推断**）、分类依据（CDE 受理数据·产品级/品种级）、产品名称（CDT 中文商品名 / CT.gov 干预名）、剂型（⭐口服固体）、企业联系方式（联系人/电话/邮箱/地址）、试验状态、登记号（可点详情链接）、登记日期、来源（CDT/CT.gov）、跟进反馈 4 列。
+**报告字段**：★ 本次新增（checkbox）、首次发现（历史批次）、窗口状态（窗口内；已过窗口仅在有反馈的行出现）、涉及API、药物分类与注册分类（**只来自 CDE 官方受理记录，未取得证据留空、不做推断**）、分类依据（CDE 受理数据·产品级/品种级）、产品名称（CDT 中文商品名 / CT.gov 干预名）、剂型（⭐口服固体）、企业联系方式（联系人/电话/邮箱/地址）、试验状态、登记号（可点详情链接）、登记日期、来源（CDT/CT.gov）、跟进反馈 4 列。
 
 **模式差异**：`search_mode` 只控制**数据抓取口径**（全量重搜 or 增量续搜），不影响交付范围——智能表格永远是**累积视图**（全量沉淀 + ★ 本次新增标识）。
 
@@ -272,6 +305,21 @@ cat .pi/settings.json
   - `snapshot.js` — 运行快照 + 增量检测
   - `report.js` — 通用报告渲染器（由场景的 `scenario.json` + `enrich.js` 驱动）
 
+### 企微 API 报 `60020 not allow to access from your ip`
+
+出口 IP 不在企业可信IP白名单（家宽重拨/换网络后常见，**属正常现象**）：
+```bash
+node scripts/wecom-sync.js checkip   # 报错信息里直接给出该加的 IP
+# → 管理后台：应用管理 → 应用 → 企业可信IP → 加上（分号分隔可多填，上限 120）
+```
+
+### 企微同步失败但 pipeline 未中断
+
+Phase 3 同步失败只影响交付层（数据在本地快照里不丢）；修复凭证/白名单后手动补同步：
+```bash
+node scripts/wecom-sync.js sync      # 用最新快照重同步
+```
+
 ### browser.js 报 `MODULE_NOT_FOUND: playwright`
 
 依赖未安装。执行：
@@ -332,7 +380,7 @@ pi-csp-agent/
 │       ├── snapshot.js                # 快照 + 增量检测
 │       ├── report.js                  # 数据模型（buildLeadModel + flattenTrials）
 │       ├── wecom.js                   # 企微 API 客户端（智能表格 + 群机器人）
-│       └── wecom-sheet.js             # 智能表格同步器（唯一交付层，38 字段）
+│       └── wecom-sheet.js             # 智能表格同步器（唯一交付层，37 字段）
 ├── prompts/lead-scan.md               # 入口命令 /lead-scan <scenario>
 └── output/
     ├── history/                       # 账本（ledger/feedback/runs，gitignore 内）

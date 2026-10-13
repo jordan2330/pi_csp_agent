@@ -197,31 +197,44 @@ function pullFeedback(records) {
 // ══════════════════════════════════════════════════
 // 初始化：创建正式表 + 全字段（幂等：已有则复用/补齐）
 // ══════════════════════════════════════════════════
-async function initSheet(docName = DEFAULT_DOC_NAME) {
+async function initSheet(docName = DEFAULT_DOC_NAME, existingDocid, existingUrl) {
   const old = W.readCfg();
   if (old.docid && old.sheet_id && old.official) { log(`正式表已存在: ${old.url}`); return old; }
 
-  log('创建正式智能表格...');
-  const doc = await W.sheet.createDoc(docName);
-  const docid = doc.docid || doc.doc_id;
-  const url = doc.url || `https://doc.weixin.qq.com/smartsheet/${docid}`;
-  const sheets = await W.sheet.getSheets(docid);
-  const sheetId = (sheets.sheet_list || sheets.sheets || [])[0]?.sheet_id;
-  if (!sheetId) throw new Error(`未取到子表ID: ${JSON.stringify(sheets).slice(0, 300)}`);
+  let docid, url, sheetId;
+  if (existingDocid) {
+    // 接入已有表（换机/多机：销售数据与反馈都在旧表里，绝不能新建第二张表）
+    docid = existingDocid;
+    url = existingUrl || `https://doc.weixin.qq.com/smartsheet/${docid}`;
+    const sheets = await W.sheet.getSheets(docid);
+    sheetId = (sheets.sheet_list || sheets.sheets || [])[0]?.sheet_id;
+    if (!sheetId) throw new Error(`无法访问文档 ${docid}（确认 docid 正确且应用在「协作-文档-API」可调用列表里）`);
+    log(`接入已有表格: ${docid}`);
+  } else {
+    log('创建正式智能表格...');
+    const doc = await W.sheet.createDoc(docName);
+    docid = doc.docid || doc.doc_id;
+    url = doc.url || `https://doc.weixin.qq.com/smartsheet/${docid}`;
+    const sheets = await W.sheet.getSheets(docid);
+    sheetId = (sheets.sheet_list || sheets.sheets || [])[0]?.sheet_id;
+    if (!sheetId) throw new Error(`未取到子表ID: ${JSON.stringify(sheets).slice(0, 300)}`);
+  }
 
-  // 清理新表默认字段：保留一个文本字段复用为「商机键」，其余删除（失败则提示手动清理）
+  // 默认字段处理：接入已有表时字段已在（下方幂等补齐）；仅新建表时需要主字段改名承接「商机键」+ 删默认列
   const def = (await W.sheet.getFields(docid, sheetId)).fields || [];
-  const texts = def.filter(f => f.field_type === 'FIELD_TYPE_TEXT');
-  const others = def.filter(f => f.field_type !== 'FIELD_TYPE_TEXT');
-  try {
-    if (texts.length) {
-      // update_fields 必须带 field_type（缺了报 2022010 invalid field type）
-      await W.sheet.updateFields(docid, sheetId, [{ field_id: texts[0].field_id, field_title: '商机键', field_type: texts[0].field_type }]);
-      if (others.length) await W.sheet.deleteFields(docid, sheetId, others.map(f => f.field_id));
-      log(`默认字段已处理：主字段改名为「商机键」，删除 ${others.length} 个默认字段`);
+  if (!existingDocid) {
+    const texts = def.filter(f => f.field_type === 'FIELD_TYPE_TEXT');
+    const others = def.filter(f => f.field_type !== 'FIELD_TYPE_TEXT');
+    try {
+      if (texts.length) {
+        // update_fields 必须带 field_type（缺了报 2022010 invalid field type）
+        await W.sheet.updateFields(docid, sheetId, [{ field_id: texts[0].field_id, field_title: '商机键', field_type: texts[0].field_type }]);
+        if (others.length) await W.sheet.deleteFields(docid, sheetId, others.map(f => f.field_id));
+        log(`默认字段已处理：主字段改名为「商机键」，删除 ${others.length} 个默认字段`);
+      }
+    } catch (e) {
+      log(`⚠️ 默认字段自动清理失败（${e.message}）——请在表格 UI 里手动删除「文本/单选/人员/数字/日期」等默认列`);
     }
-  } catch (e) {
-    log(`⚠️ 默认字段自动清理失败（${e.message}）——请在表格 UI 里手动删除「文本/单选/人员/数字/日期」等默认列`);
   }
 
   const have = new Set(((await W.sheet.getFields(docid, sheetId)).fields || []).map(f => f.field_title));

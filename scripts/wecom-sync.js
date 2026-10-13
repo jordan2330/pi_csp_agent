@@ -22,10 +22,16 @@ const WS = path.resolve(__dirname, '..');
 
 const log = (...a) => console.log(...a);
 
-async function cmdInit() {
-  const c = await S.initSheet();
+async function cmdInit(docid, url) {
+  W.loadEnv();
+  // 换机/多机接入已有表：init <docid> [url]，或 .env 里 WECOM_DOCID/WECOM_DOC_URL；
+  // 也可直接从旧机拷 config/wecom.json（含 docid/sheet_id/url）——三种方式等价
+  const existingId = docid || process.env.WECOM_DOCID;
+  const existingUrl = url || process.env.WECOM_DOC_URL;
+  const c = await S.initSheet(undefined, existingId, existingUrl);
   log(`docid=${c.docid}`);
   log(`sheet_id=${c.sheet_id}`);
+  if (existingId) log('→ 接入已有表，销售数据与反馈不受影响。跑一次 sync 验证：node scripts/wecom-sync.js sync');
 }
 
 async function cmdSync(scenarioName = 'nitrosamine') {

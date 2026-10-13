@@ -20,7 +20,7 @@ description: 亚硝胺药物商机发掘场景。从FDA页面抓取亚硝胺杂�
 - WSL 为 mirrored 网络模式（`.wslconfig` → `networkingMode=mirrored`），且 playwright 库已安装（`skills/browser_executor/scripts/` 下 `npm i`）
 - `DASHSCOPE_API_KEY` 已配置
 - **企微自建应用已配置**（交付物为智能表格，v5.0.0 起取代 Excel）：`.env` 填 `WECOM_CORPID`/`WECOM_SECRET`（模板见 `.env.example`）；管理后台已做三件事：创建自建应用、把应用加入「协作-文档-API】可调用接口的应用」、把运行环境出口 IP 加入应用「企业可信IP」
-- 首次运行前先初始化表格：`node scripts/wecom-sync.js init`（幂等）；换网络/IP 变动报 60020 时跑 `node scripts/wecom-sync.js checkip` 查出需加白名单的 IP
+- 首次运行前先初始化表格：`node scripts/wecom-sync.js init`（幂等）；换网络/IP 变动报 60020 时跑 `node scripts/wecom-sync.js checkip` 查出需加白名单的 IP；**换机/多机接入已有表**：`init <docid> [url]` 或拷贝 `config/wecom.json`（见 README「多机部署」——绝不能盲跑 init 建第二张表）
 - 原因：CDT 已启用瑞数动态安全（JS 质询 + 指纹检测），headless/自动化浏览器会被拦，必须用真实 Chrome
 
 ---
