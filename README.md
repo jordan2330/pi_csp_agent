@@ -32,7 +32,7 @@
 - **WSL2 (Ubuntu 22.04)** + **Windows 11 22H2+**（mirrored 网络模式的要求）
 - **Node.js 20+**（当前开发环境 v24）
 - **Windows 侧 Google Chrome**：CDT 反爬（瑞数动态安全）必须用真实浏览器，headless 会被拦截
-- **DashScope API Key**：在 [阿里云百炼](https://bailian.console.aliyun.com/) 创建，模型包括 qwen3.7-max、deepseek-v4-pro、glm-5.2、kimi-k2.6 等
+- **DashScope API Key**（**仅 pi 交互/开发需要；生产定时任务不需要**）：在 [阿里云百炼](https://bailian.console.aliyun.com/) 创建，模型包括 qwen3.7-max、deepseek-v4-pro、glm-5.2、kimi-k2.6 等
 - **企微自建应用（交付物需要，管理员权限）**：① 企业ID + 应用 Secret；② 管理后台「协作 → 文档 → API」把应用加入可调用列表；③ 应用详情页「企业可信IP」加入运行机出口 IPv4（出口 IP 变了报 60020，跑 `node scripts/wecom-sync.js checkip` 查新 IP 加白名单）
 - **网络**：需能访问 `dashscope.aliyuncs.com`、`fda.gov`、`chinadrugtrials.org.cn`、`clinicaltrials.gov`、`qyapi.weixin.qq.com`
 - **一次性配置**：`C:\Users\<你>\.wslconfig` 加入 `networkingMode=mirrored`，然后 `wsl --shutdown` 重启（让 WSL 能访问 Windows 的 `127.0.0.1:9223`）
@@ -50,7 +50,7 @@ cd skills/browser_executor/scripts && PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm i &
 # 3. 启动 Windows 侧真实 Chrome（专用 profile + CDP 端口 9223；已在运行则秒退）
 bash scripts/launch-chrome.sh
 
-# 4. 配置模型（LLM）
+# 4. 配置模型（LLM；仅交互/开发用，纯生产定时任务可跳过）
 mkdir -p ~/.pi/agent && cp config/models.json ~/.pi/agent/models.json
 export DASHSCOPE_API_KEY=sk-你的key        # 建议写入 ~/.bashrc
 
@@ -93,25 +93,36 @@ node scripts/wecom-sync.js init <docid> [url]
 
 ## 运行模式
 
-### 非交互运行（生产/定时用）
+### 生产运行（定时/无人值守）—— 直接跑脚本，不需要 pi
 
 ```bash
-# 增量模式（默认）：只搜索新 API，通常几十分钟
-pi -p "/lead-scan nitrosamine"
+# 增量模式（默认，通常 1 小时内）
+bash scripts/launch-chrome.sh
+node scripts/run-pipeline.js nitrosamine
 
-# 全量模式：先改配置，再运行（约 3-4 小时）
+# 全量模式（首次部署或需要重扫，约 3-4 小时）
 echo '{"search_mode": "full"}' > config/search-config.json
-pi -p "/lead-scan nitrosamine"
+node scripts/run-pipeline.js nitrosamine    # 完成后自动改回 incremental
 ```
 
-`-p` 模式（非交互）下 Pi 不启动 TUI，直接执行 prompt 并退出。
+pipeline 整条链路（CT.gov REST → CDT 浏览器采集 → CDE 富化 → 智能表格同步 → 群推送）**零 LLM 依赖**：不消耗 token、不需要 `DASHSCOPE_API_KEY`、不需要 pi。
 
-**执行流程**：
-1. Agent 读取 `search-config.json` 确认模式
-2. Agent 确认 Chrome CDP 端点可用（不通则运行 `bash scripts/launch-chrome.sh`）
-3. Agent 检查 FDA 缓存（有则跳过采集）
-4. Agent 调用 `scripts/run-pipeline.js` 自动完成搜索+报告
-5. Agent 输出结果摘要后退出
+前置只有一条：`config/fda_nitrosamines.json` 必须存在（首次部署由 pi 或人工按 SKILL.md Phase 1 采集生成；之后 FDA 页面季度性更新时用 pi 刷新一次即可）。
+
+### 交互运行（开发 / 调试 / FDA 采集 / 页面改版适配）—— pi
+
+```bash
+pi
+/model qwen3.7-max
+/lead-scan nitrosamine
+```
+
+pi 的价值在流水线之外：
+- **FDA 首次采集与刷新**（SKILL.md Phase 1：按页面结构生成 browser 采集脚本）
+- **改版适配**：CDT/FDA 页面结构变化导致选择器失效时，交互式诊断 + screenshot 分析 + 修脚本
+- **异常排查、开发迭代、数据问答**
+
+> `/lead-scan` prompt 本质是让 Agent 按 SKILL.md 做前置检查 → 调 `run-pipeline.js` → 汇报结果。生产定时任务用它纯属多余（多一层 LLM 依赖与故障点）。
 
 ### 交互式调试（开发用）
 
