@@ -33,7 +33,7 @@ This is a Pi Coding Agent project for CSP (Aptar active packaging) sales lead di
   - `lib/snapshot.js` — 快照管理 + 增量检测
   - `lib/report.js` — 通用**数据模型**（buildLeadModel：窗口切分/证据挂载/分类 + flattenTrials：一行=一条商机，含合并规则与不变量自检）
   - `lib/wecom.js` — 企微 API 客户端（token 缓存 / 智能表格 CRUD / 群机器人推送 / .env 零依赖解析）
-  - `lib/wecom-sheet.js` — **智能表格同步器（唯一交付层）**：SCHEMA 38 字段 / 反馈拉取 / upsert（字段级合并，不覆盖销售输入）
+  - `lib/wecom-sheet.js` — **智能表格同步器（唯一交付层）**：SCHEMA 37 字段 / 反馈拉取 / upsert（字段级合并，不覆盖销售输入）
   - `wecom-sync.js` — 表格运维 CLI（init 初始化 / status / feedback / checkip 查白名单 IP）
   - `lib/history.js` — 商机沉淀账本（首次发现/最近出现 + 运行批次档案 + 归档行合并）
   - `lib/cde-classify.js` — **法规分类富化（主数据源）**：CDE 官方受理品种信息 → 注册分类 1/2/3/4/5.2类（免费、一手；真实浏览器 DOM 提取）
