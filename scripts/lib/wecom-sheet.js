@@ -235,6 +235,15 @@ async function initSheet(docName = DEFAULT_DOC_NAME, existingDocid, existingUrl)
     } catch (e) {
       log(`⚠️ 默认字段自动清理失败（${e.message}）——请在表格 UI 里手动删除「文本/单选/人员/数字/日期」等默认列`);
     }
+    // 新建表自带几条空记录 → 清掉（只删主键为空的，安全）
+    // 只在新建表时做：接入已有表（existingDocid）时主字段可能尚未建好，全表「商机键」为空 → 会删光别人的数据
+    try {
+      const empties = (await W.sheet.getRecords(docid, sheetId)).filter(r => !W.plain(r.values?.['商机键']));
+      if (empties.length) {
+        await W.sheet.deleteRecords(docid, sheetId, empties.map(r => r.record_id));
+        log(`已清理 ${empties.length} 条默认空记录`);
+      }
+    } catch (_) { /* 清理失败不影响使用 */ }
   }
 
   const have = new Set(((await W.sheet.getFields(docid, sheetId)).fields || []).map(f => f.field_title));
@@ -243,14 +252,6 @@ async function initSheet(docName = DEFAULT_DOC_NAME, existingDocid, existingUrl)
     await W.sheet.addFields(docid, sheetId, missing);
     log(`已添加 ${missing.length} 个字段`);
   }
-  // 新建表自带几条空记录 → 清掉（只删主键为空的，安全）
-  try {
-    const empties = (await W.sheet.getRecords(docid, sheetId)).filter(r => !W.plain(r.values?.['商机键']));
-    if (empties.length) {
-      await W.sheet.deleteRecords(docid, sheetId, empties.map(r => r.record_id));
-      log(`已清理 ${empties.length} 条默认空记录`);
-    }
-  } catch (_) { /* 清理失败不影响使用 */ }
   W.writeCfg({ docid, sheet_id: sheetId, url, official: true, created_at: new Date().toISOString() });
   log(`✅ 正式表就绪: ${url}`);
   return { docid, sheet_id: sheetId, url };
@@ -262,6 +263,9 @@ async function initSheet(docName = DEFAULT_DOC_NAME, existingDocid, existingUrl)
 async function sync(snapshot, scenario, isFull, meta = {}) {
   const ctx = buildLeadModel(snapshot, scenario, isFull);
   const rows = flattenTrials(ctx, 'all');
+  // 自检命中的行：分类三列一律留空（宁可空——口径允许空——也不能把矛盾组合写进销售看的表）
+  const badKeys = new Set((rows.violations || []).map(([k]) => k));
+  for (const r of rows) if (badKeys.has(r.key)) { r.drugClass = ''; r.regClass = ''; r.classBasis = ''; }
   const activeRows = rows.filter(r => r.windowState === '窗口内');
   const newRows = rows.filter(r => r.star === '★').length;
   const newOutWin = rows.filter(r => r._isNewRaw && r.windowState !== '窗口内').length;
@@ -283,10 +287,14 @@ async function sync(snapshot, scenario, isFull, meta = {}) {
   if (fbChanges.length) log(`销售反馈：${fbChanges.length} 条变化已入账（feedback.json）`);
 
   // ── 表内容口径：窗口内 ∪ 有反馈（销售跟过的线索不消失）；其余（出窗口/归档）移出表 ──
-  const recHasFeedback = (rec) => !!(W.plain(rec.values?.['跟进状态']) || W.plain(rec.values?.['跟进备注']) || (rec.values?.['负责人'] || []).length);
+  const recHasFeedback = (rec) => !!(W.plain(rec.values?.['跟进状态']) || W.plain(rec.values?.['跟进备注']) || (rec.values?.['负责人'] || []).length || W.plain(rec.values?.['跟进日期']));
   const feedbackKeys = new Set([...existing.entries()].filter(([, rec]) => recHasFeedback(rec)).map(([k]) => k));
   const keep = rows.filter(r => r.windowState === '窗口内' || feedbackKeys.has(r.key));
   const keepKeys = new Set(keep.map(r => r.key));
+
+  // 护栏：采集失败（Chrome 断/C 端拦截）会让快照骤减 → 整表被批量删空。保留行数腰斩时拒绝写入
+  if (existing.size && keep.length < existing.size * 0.5 && process.env.WECOM_ALLOW_SHRINK !== '1')
+    throw new Error(`拒绝同步：本轮保留 ${keep.length} 行，不足表内 ${existing.size} 行的一半（疑似采集失败）。先看 output/runs/errors.log；确属窗口调整则 WECOM_ALLOW_SHRINK=1 重跑`);
 
   // ── upsert：新键 add；已有键只写变化字段（反馈列永不写）──
   const toAdd = [], toUpdate = [];
@@ -303,7 +311,8 @@ async function sync(snapshot, scenario, isFull, meta = {}) {
   }
 
   // ── 清理：表里有但不在保留集的记录（出窗口且无反馈 / 归档行）→ 删除（本地账本留档）──
-  const toDelete = [...existing.entries()].filter(([k]) => !keepKeys.has(k)).map(([, rec]) => rec.record_id);
+  // 有反馈的行永不删除（即使本轮快照里没有这个键：销售手工加的、键格式漂移的，都属于「跟过的线索」）
+  const toDelete = [...existing.entries()].filter(([k]) => !keepKeys.has(k) && !feedbackKeys.has(k)).map(([, rec]) => rec.record_id);
 
   const added = toAdd.length ? (await W.sheet.addRecords(cfg.docid, cfg.sheet_id, toAdd)).length : 0;
   const updated = toUpdate.length ? (await W.sheet.updateRecords(cfg.docid, cfg.sheet_id, toUpdate)).length : 0;
@@ -327,7 +336,7 @@ async function sync(snapshot, scenario, isFull, meta = {}) {
       archived: rows.filter(r => r.windowState === '已归档').length,
       sources: srcCount, enrich: { cde_products: cdeStat.total, cde_signals: cdeStat.signals }
     });
-  } catch (_) { /* runs.json 不可写时不影响交付物 */ }
+  } catch (e) { log(`⚠️ runs.json 批次档案写入失败（不影响交付物）: ${e.message}`); }
 
   return {
     url: cfg.url,

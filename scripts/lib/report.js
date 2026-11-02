@@ -409,11 +409,12 @@ function flattenTrials(ctx, scope = 'all') {
       const b = BASIS_RANK[r2.classBasis] != null ? BASIS_RANK[r2.classBasis] : 3;
       return (r2.nmpaLevel === 'product' ? 0 : 10) + b;   // 产品级证据（精确命中试验产品）最强
     };
+    // 三列只能成套搬运（上一行的 regClass 单独兜底已删：rank 相等时会把另一条 API 的注册分类拼到本行的分类上，
+    // 产出「原研药 + 注册 4」这类矛盾组合——自检会报但仍会写进表）
     if (rank(r) < rank(cur)) {
       cur.drugClass = r.drugClass; cur.classBasis = r.classBasis;
       cur.regClass = r.regClass; cur.nmpaLevel = r.nmpaLevel;
     }
-    if (!cur.regClass && r.regClass) cur.regClass = r.regClass;
     // 剂型取能识别到的那个（不同 API 的提取结果可能不同）
     const curOk = cur.dosageForm && cur.dosageForm !== '未识别';
     const rOk = r.dosageForm && r.dosageForm !== '未识别';

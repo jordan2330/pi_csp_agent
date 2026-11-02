@@ -56,6 +56,21 @@ async function cmdSync(scenarioName = 'nitrosamine') {
 async function cmdReorder() {
   const c = W.readCfg();
   if (!c.docid) throw new Error('尚未初始化，先跑 init');
+  // 反馈 4 列会被 deleteFields 连带清空（字段删除不可逆）→ 先落盘备份，重建后按字段类型重建值回写
+  const recs = await W.sheet.getRecords(c.docid, c.sheet_id);
+  const backup = recs.map(r => ({
+    record_id: r.record_id,
+    status: W.plain(r.values?.['跟进状态']),
+    owner: (r.values?.['负责人'] || []).map(u => u.user_id).filter(Boolean).join(','),
+    note: W.plain(r.values?.['跟进备注']),
+    fdate: r.values?.['跟进日期'] ? String(r.values['跟进日期']) : ''
+  })).filter(b => b.status || b.owner || b.note || b.fdate);
+  if (backup.length) {
+    const bk = path.join(WS, 'output', 'history', `reorder-feedback-${Date.now()}.json`);
+    fs.mkdirSync(path.dirname(bk), { recursive: true });
+    fs.writeFileSync(bk, JSON.stringify(backup, null, 1));
+    log(`⚠️ 重建字段会清空反馈 4 列 —— 已备份 ${backup.length} 行反馈到 ${bk}（重建后自动回写）`);
+  }
   const { fields = [] } = await W.sheet.getFields(c.docid, c.sheet_id);
   const mainTitle = S.SCHEMA[0].field_title;   // 主字段（不可删）
   const others = fields.filter(f => f.field_title !== mainTitle);
@@ -67,6 +82,22 @@ async function cmdReorder() {
   const ordered = S.SCHEMA.filter(f => f.field_title !== mainTitle).slice().reverse();
   await W.sheet.addFields(c.docid, c.sheet_id, ordered);
   const after = (await W.sheet.getFields(c.docid, c.sheet_id)).fields || [];
+  if (backup.length) {
+    const opts = after.find(f => f.field_title === '跟进状态')?.property_single_select?.options || [];
+    const restore = backup.map(b => {
+      const values = {};
+      if (b.status) values['跟进状态'] = opts.filter(o => o.text === b.status).map(o => ({ id: o.id, text: o.text }));
+      if (b.owner) values['负责人'] = b.owner.split(',').map(uid => ({ user_id: uid }));
+      if (b.note) values['跟进备注'] = W.V.text(b.note);
+      if (b.fdate) values['跟进日期'] = W.V.date(Number(b.fdate));
+      return { record_id: b.record_id, values };
+    }).filter(x => Object.keys(x.values).length);
+    if (restore.length) {
+      await W.sheet.updateRecords(c.docid, c.sheet_id, restore);
+      log(`已回写 ${restore.length} 行的反馈（跟进状态/负责人/跟进备注/跟进日期）`);
+    }
+  }
+  log('系统留痕 4 列由表格自动维护，重建后从本次运行重新开始记录');
   log(`✅ 已按销售视角顺序重建 ${ordered.length} 个字段`);
   log('当前字段顺序（应即 UI 左→右）: ');
   log('  ' + after.map(f => f.field_title).join(' → '));

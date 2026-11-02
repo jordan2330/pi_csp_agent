@@ -631,7 +631,9 @@ async function phase3_report(isFull) {
     log(r.violations ? `⚠️ 列一致性自检: ${r.violations} 处矛盾（见上方 stderr）` : `列一致性自检: 通过（分类/证据列无矛盾组合）`);
     await notifyGroup(r);
   } catch (e) {
+    // 交付失败必须让调用方（cron）看得到：否则「表未同步」与「同步成功」退出码无差别
     log(`智能表格同步失败: ${e.message}`);
+    process.exitCode = 1;
   }
 }
 

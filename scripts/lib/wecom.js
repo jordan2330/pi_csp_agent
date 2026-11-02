@@ -115,7 +115,12 @@ const sheet = {
   /** 单次 ≤500 行（官方建议）；超出自动分批 */
   addRecords: (docid, sheetId, records) => batchCall('/wedoc/smartsheet/add_records', docid, sheetId, records, 500),
   updateRecords: (docid, sheetId, records) => batchCall('/wedoc/smartsheet/update_records', docid, sheetId, records, 500),
-  deleteRecords: (docid, sheetId, recordIds) => api('/wedoc/smartsheet/delete_records', { docid, sheet_id: sheetId, record_ids: recordIds }),
+  /** 删除记录（也按 500 分批：add/update 已落库后 delete 报错会留半更新态） */
+  deleteRecords: async (docid, sheetId, recordIds) => {
+    for (let i = 0; i < recordIds.length; i += 500) {
+      await api('/wedoc/smartsheet/delete_records', { docid, sheet_id: sheetId, record_ids: recordIds.slice(i, i + 500) });
+    }
+  },
   /** 全量拉取（自动翻页，每页 1000） */
   async getRecords(docid, sheetId, { fieldTitles, viewId } = {}) {
     const out = [];

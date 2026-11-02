@@ -26,13 +26,15 @@ argument-hint: "<scenario>"
   ```
 - 每隔 2 分钟检查：`tail -5 output/runs/pipeline.log` + `kill -0 <PID>` 判断是否完成
 - 如果待搜索 API 为 0（增量模式），pipeline 会秒级完成，可先同步尝试
-- 脚本自动完成：CT.gov REST API 搜索 → CDT 浏览器搜索 → 快照生成 → 报告生成
+- 脚本自动完成：CT.gov REST API 搜索 → CDT 浏览器搜索 → 快照生成 → 同步企微智能表格（唯一交付物）
 - 全量模式下搜索完成会自动将 search_mode 改回 incremental
 
 ### 完成后
-- 读取 `output/CSP_Leads_Report.md` 的概览部分，输出简要总结
+- 交付物 = 企微智能表格「CSP商机跟踪」（不生成任何本地报告文件）；表格链接看 `config/wecom.json` 的 `url`
+- 用 pipeline 日志的尾几行汇报：表内行数 / 新增 / 更新 / 移出 / ★ 本批次新增 / 列一致性自检
+- 需要单独看表状态时：`node scripts/wecom-sync.js status`
 - 检查 `output/runs/errors.log`，汇报失败的 API（如有）
-- 报告文件路径：`output/CSP_Leads_Report.md`
+- pipeline 退出码非 0 = 交付失败（表格未同步），必须当失败汇报，不要说「已完成」
 
 ## 代码安全约束
 

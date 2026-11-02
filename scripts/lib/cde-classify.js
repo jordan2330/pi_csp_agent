@@ -53,7 +53,10 @@ function loadCache() {
 function saveCache(cache) {
   cache.rules_version = RULES_VERSION;
   cache.updated_at = new Date().toISOString().slice(0, 10);
-  fs.writeFileSync(CACHE_FILE, JSON.stringify(cache, null, 1));
+  // 原子写：逐条落盘，中断留下截断 JSON → loadCache 静默返回空 → 三列分类会被全表清空
+  const tmp = CACHE_FILE + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(cache, null, 1));
+  fs.renameSync(tmp, CACHE_FILE);
 }
 function isFresh(entry, ttlDays) {
   if (!entry || !entry.queried_at) return false;
