@@ -45,7 +45,7 @@ This is a Pi Coding Agent project for CSP (Aptar active packaging) sales lead di
   - `search-config.json` — 搜索模式控制（full / incremental）
   - `fda_nitrosamines.json` — FDA 缓存（运行时生成，不纳入版本控制）
 - `output/` — 运行快照与账本（derived data）
-  - 唯一交付物 = **企微智能表格「CSP商机跟踪」**（由 `scripts/lib/wecom-sheet.js` 同步；docid 在 `config/wecom.json`，gitignore）
+  - 唯一交付物 = **企微智能表格「CSP商机跟踪」**（由 `scripts/lib/wecom-sheet.js` 同步；docid 存运行时配置，gitignore）：`WECOM_ENV` 缺省 prod → `config/wecom.json`，其他环境（如 dev）→ `config/wecom.<env>.json`；破坏性写入经 `wecom.guardWrite()` 校验 env+host，跨环境/跨机直接拒绝
   - `history/ledger.json` — **沉淀账本**：每条商机的首次发现/最近出现（不随数据源缓存重置而丢失）
   - `history/feedback.json` — **销售反馈账本**：跟进状态/负责人/备注/日期 事件流（谁/何时/改了什么，从表格拉回）
   - `history/runs.json` — 运行批次档案（时间 / 新增 / 累计 / 数据源计数）

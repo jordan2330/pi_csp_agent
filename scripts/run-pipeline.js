@@ -723,7 +723,8 @@ async function main() {
   log(`║ CT.gov: ${ctgovStats.done} APIs, ${ctgovStats.totalStudies} fetched, ${ctgovStats.unchangedApis} 无变化, ${ctgovStats.totalNew || 0} 新增, ${ctgovStats.errors} errors`);
   log(`║ CDT:    ${cdtStats.done} APIs, ${cdtStats.totalTrials} new, ${cdtStats.skippedNoNew} 无新增, ${cdtStats.errors} errors`);
   let sheetUrl = '';
-  try { sheetUrl = JSON.parse(fs.readFileSync(path.join(WS, 'config', 'wecom.json'), 'utf8')).url || ''; } catch (_) {}
+  // 按 WECOM_ENV 读对应环境的配置（dev 上不会把生产表链接打进日志）
+  try { sheetUrl = require(path.join(__dirname, 'lib', 'wecom.js')).readCfg().url || ''; } catch (_) {}
   log(`║ 交付物: 智能表格 ${sheetUrl || '(未初始化，先跑 node scripts/wecom-sync.js init)'}`);
   log('╚══════════════════════════════════════╝');
 }

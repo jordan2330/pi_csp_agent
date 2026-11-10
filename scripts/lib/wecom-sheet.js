@@ -23,6 +23,7 @@
  */
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const W = require('./wecom.js');
 const { buildLeadModel, flattenTrials } = require('./report.js');
@@ -199,7 +200,12 @@ function pullFeedback(records) {
 // ══════════════════════════════════════════════════
 async function initSheet(docName = DEFAULT_DOC_NAME, existingDocid, existingUrl) {
   const old = W.readCfg();
-  if (old.docid && old.sheet_id && old.official) { log(`正式表已存在: ${old.url}`); return old; }
+  if (old.docid && old.sheet_id && old.official) {
+    if (!old.env || !old.host) { W.writeCfg(old); log(`配置已补章: env=${W.envOf()} host=${os.hostname()}`); }
+    log(`正式表已存在: ${old.url}`); return old;
+  }
+  // init 是本环境第一次建表 → 不能因为「未初始化」把自己挡住（requireCfg: false）
+  W.guardWrite('init', { requireCfg: false });
 
   let docid, url, sheetId;
   if (existingDocid) {
@@ -211,6 +217,9 @@ async function initSheet(docName = DEFAULT_DOC_NAME, existingDocid, existingUrl)
     if (!sheetId) throw new Error(`无法访问文档 ${docid}（确认 docid 正确且应用在「协作-文档-API」可调用列表里）`);
     log(`接入已有表格: ${docid}`);
   } else {
+    // 非生产环境建表自动加后缀：避免开发机的「CSP商机跟踪」与生产表重名
+    const env = W.envOf();
+    if (docName === DEFAULT_DOC_NAME && env !== 'prod') docName = `${DEFAULT_DOC_NAME}-${env}`;
     log('创建正式智能表格...');
     const doc = await W.sheet.createDoc(docName);
     docid = doc.docid || doc.doc_id;
@@ -270,8 +279,8 @@ async function sync(snapshot, scenario, isFull, meta = {}) {
   const newRows = rows.filter(r => r.star === '★').length;
   const newOutWin = rows.filter(r => r._isNewRaw && r.windowState !== '窗口内').length;
 
-  const cfg = W.readCfg();
-  if (!cfg.docid) throw new Error('智能表格未初始化 —— 先跑 node scripts/wecom-sync.js init');
+  const cfg = W.guardWrite('sync');
+  log(W.targetLine(cfg));
   const byTitle = await fieldIndex();
 
   // ── 拉全表（一次调用翻页取回；含反馈列 + 系统留痕列）──

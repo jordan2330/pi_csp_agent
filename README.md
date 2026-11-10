@@ -40,7 +40,7 @@
 ## 快速开始
 
 ```bash
-# 1. 克隆仓库（默认分支 master = 当前稳定基线 v5.1.1；v4 分支已冻结在 v5.0.0，仅存档）
+# 1. 克隆仓库（默认分支 master = 当前稳定基线，版本以 CHANGELOG.md「当前稳定基线」为准）
 git clone https://github.com/jordan2330/pi_csp_agent.git
 cd pi_csp_agent
 
@@ -85,11 +85,36 @@ node scripts/wecom-sync.js init <docid> [url]
 | 文件 | 必拷? | 说明 |
 |---|---|---|
 | `.env` | **必** | 企微凭证（新旧机器各自配也行） |
-| `config/wecom.json` | **必** | 表格 docid/sheet_id/url（或用方式 B） |
+| `config/wecom.json` | **必** | 表格 docid/sheet_id/url（或用方式 B）；**只拷到真正的生产机**（开发机应设在 dev 环境自己的表，见下节） |
 | `config/fda_nitrosamines.json` | 建议 | 不拷则首跑重新采集 FDA 页（走 Phase 1）+ **CDT 全量重搜（3-4 小时）**；拷了则增量 |
 | `output/history/ledger.json` | 建议 | 不拷则「首次发现」日期从新机首跑日重建 |
 | `config/cde_class_cache.json` | 可选 | 不拷则 CDE 分类证据重查（免费接口，多几分钟） |
 | 企业可信IP | **必（后台）** | 新机器出口 IP 需加入企微管理后台白名单 |
+
+### 环境隔离（生产 / 开发）
+
+交付层写哪张表由 `WECOM_ENV` 决定：缺省 `prod` → `config/wecom.json`；`dev` → `config/wecom.dev.json`（其他环境同理 `config/wecom.<env>.json`）。两张表互不可达——**刻意不做跨环境回退**。
+
+```bash
+# ① 生产机（一次性）：给已有 config/wecom.json 补上 env/host 盖章
+node scripts/wecom-sync.js init        # 表已存在 → 只补章，不重建、不碰数据
+
+# ② 开发机（一次性）：固定 dev 身份 + 建自己的测试表（表名为「CSP商机跟踪-dev」）
+echo 'WECOM_ENV=dev' >> .env            # 不设 = prod，忘设就会直写生产表
+WECOM_ENV=dev node scripts/wecom-sync.js init
+```
+
+误跑时的报错长这样（写入前拦下，不会碰到生产数据）：
+
+```
+❌ 拒绝写入（sync）：wecom.json 属于 env=prod，当前 WECOM_ENV=dev。
+  → 用对应环境：WECOM_ENV=prod node scripts/wecom-sync.js sync
+  → 或在本环境建自己的表：WECOM_ENV=dev node scripts/wecom-sync.js init
+```
+
+配置里的 `host` 也参与校验：把生产 `config/wecom.json` 拷到另一台机器后直接 `sync` 会被拒绝（目标表由主机「旧机」创建）。本机**确为新的生产机**时用 `WECOM_ADOPT=1 node scripts/wecom-sync.js init <docid>` 一次性接管；只读命令（`status` / `feedback` / `checkip`）不受任何拦截。
+
+⚠️ **唯一残洞**：开发机上不设 `WECOM_ENV`，且生产机的 `config/wecom.json` 还没补章（v5.2.0 之后跑过一次 `init`）——此时开发机的 dev 身份无从识别，仍会写生产表。做法：生产机先跑一次 `init` 补章，开发机 `echo 'WECOM_ENV=dev' >> .env`。
 
 ## 运行模式
 

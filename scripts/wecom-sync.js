@@ -11,6 +11,8 @@
  *   checkip           换网络/IP 漂移后自检（报 60020 时告诉你该把哪个 IP 加白名单）
  *
  * 日常同步不经过本 CLI：pipeline（scripts/run-pipeline.js）每次运行自动 sync。
+ * 环境隔离：默认 prod（config/wecom.json）；开发/测试机器 `.env` 里加 `WECOM_ENV=dev`，
+ *   否则本机误跑 sync/reorder 会直接写生产表。
  */
 
 const fs = require('fs');
@@ -26,6 +28,7 @@ async function cmdInit(docid, url) {
   W.loadEnv();
   // 换机/多机接入已有表：init <docid> [url]，或 .env 里 WECOM_DOCID/WECOM_DOC_URL；
   // 也可直接从旧机拷 config/wecom.json（含 docid/sheet_id/url）——三种方式等价
+  // 开发/测试机器先用 WECOM_ENV=dev（否则默认 prod，会接/建生产表）
   const existingId = docid || process.env.WECOM_DOCID;
   const existingUrl = url || process.env.WECOM_DOC_URL;
   const c = await S.initSheet(undefined, existingId, existingUrl);
@@ -54,8 +57,8 @@ async function cmdSync(scenarioName = 'nitrosamine') {
 }
 
 async function cmdReorder() {
-  const c = W.readCfg();
-  if (!c.docid) throw new Error('尚未初始化，先跑 init');
+  const c = W.guardWrite('reorder');
+  log(W.targetLine(c));
   // 反馈 4 列会被 deleteFields 连带清空（字段删除不可逆）→ 先落盘备份，重建后按字段类型重建值回写
   const recs = await W.sheet.getRecords(c.docid, c.sheet_id);
   const backup = recs.map(r => ({
@@ -105,8 +108,9 @@ async function cmdReorder() {
 }
 
 async function cmdStatus() {
+  log(`环境: ${W.envOf()} (${path.basename(W.cfgFile())})`);
   const c = W.readCfg();
-  if (!c.docid) throw new Error('尚未初始化，先跑 init');
+  if (!c.docid) throw new Error(`尚未初始化，先跑 WECOM_ENV=${W.envOf()} node scripts/wecom-sync.js init`);
   const { fields = [] } = await W.sheet.getFields(c.docid, c.sheet_id);
   const recs = await W.sheet.getRecords(c.docid, c.sheet_id);
   const w = W.plain;

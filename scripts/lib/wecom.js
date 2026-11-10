@@ -2,8 +2,9 @@
  * 企业微信 API 客户端 —— 智能表格（唯一交付物的新形态）+ 群机器人推送
  *
  * 凭证（.env 或环境变量）：WECOM_CORPID / WECOM_SECRET（见 .env.example）
- * 运行时资源（init 后自动生成，gitignore）：
- *   config/wecom.json          { docid, sheet_id, url }
+ * 运行时资源（init 后自动生成，gitignore；WECOM_ENV 选环境，缺省 prod）：
+ *   config/wecom.json          { docid, sheet_id, url, env, host }   生产
+ *   config/wecom.<env>.json    同上，其他环境（如 wecom.dev.json）
  *   config/.wecom_token.json   access_token 缓存（提前 5 分钟刷新）
  *
  * API 要点（对照 2026-01 官方文档）：
@@ -20,10 +21,10 @@
  */
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const WS = path.resolve(__dirname, '..', '..');
-const CFG_FILE = path.join(WS, 'config', 'wecom.json');
 const TOKEN_FILE = path.join(WS, 'config', '.wecom_token.json');
 const QYAPI = 'https://qyapi.weixin.qq.com/cgi-bin';
 
@@ -46,12 +47,56 @@ function cred() {
   return { corpid, secret };
 }
 
+// ── 环境隔离：WECOM_ENV 选目标环境（缺省 prod，路径与老版本一致 → 生产机零迁移）──
+//   prod  → config/wecom.json        dev → config/wecom.dev.json（config/wecom*.json 已 gitignore）
+//   刻意不做跨环境回退：dev 身份下生产 docid 不可达
+function envOf() {
+  loadEnv();
+  const e = process.env.WECOM_ENV || 'prod';
+  if (!/^[a-zA-Z0-9_-]+$/.test(e)) throw new Error(`WECOM_ENV 非法: ${e}（只允许字母数字 _ -）`);
+  return e;
+}
+function cfgFile() {
+  const e = envOf();
+  return path.join(WS, 'config', e === 'prod' ? 'wecom.json' : `wecom.${e}.json`);
+}
+
 // ── 运行时资源（docid/sheet_id）：原子写，同 history.js 风格 ──
-function readCfg() { try { return JSON.parse(fs.readFileSync(CFG_FILE, 'utf8')); } catch { return {}; } }
+function readCfg() { try { return JSON.parse(fs.readFileSync(cfgFile(), 'utf8')); } catch { return {}; } }
 function writeCfg(cfg) {
-  const tmp = CFG_FILE + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2));
-  fs.renameSync(tmp, CFG_FILE);
+  const f = cfgFile(), tmp = f + '.tmp';
+  // 盖章：记录这张表属于哪个环境/哪台机器，guardWrite 据此拒绝跨机写入
+  fs.writeFileSync(tmp, JSON.stringify({ ...cfg, env: envOf(), host: os.hostname() }, null, 2));
+  fs.renameSync(tmp, f);
+}
+
+/**
+ * 破坏性写入前的环境/归属校验（只读命令不调用）
+ * @param {string} action init | sync | reorder
+ * @param {{requireCfg?: boolean}} [opts] requireCfg=false 用于 init（允许本环境尚无配置）
+ */
+function guardWrite(action, { requireCfg = true } = {}) {
+  const cfg = readCfg();
+  const env = envOf(), host = os.hostname(), file = path.basename(cfgFile());
+  if (!cfg.docid) {
+    if (requireCfg) throw new Error(`${action} 失败：${file} 未初始化 —— 先跑 WECOM_ENV=${env} node scripts/wecom-sync.js init`);
+    return cfg;
+  }
+  if ((cfg.env || 'prod') !== env) throw new Error(
+    `拒绝写入（${action}）：${file} 属于 env=${cfg.env || 'prod'}，当前 WECOM_ENV=${env}。\n` +
+    `  → 用对应环境：WECOM_ENV=${cfg.env || 'prod'} node scripts/wecom-sync.js ${action}\n` +
+    `  → 或在本环境建自己的表：WECOM_ENV=${env} node scripts/wecom-sync.js init`);
+  if (cfg.host && cfg.host !== host && process.env.WECOM_ADOPT !== '1') throw new Error(
+    `拒绝写入（${action}）：目标表由主机「${cfg.host}」创建，本机是「${host}」。\n` +
+    `  · 开发/测试：WECOM_ENV=dev node scripts/wecom-sync.js init   （建独立测试表，生产零风险）\n` +
+    `  · 本机确为新的生产机：WECOM_ADOPT=1 node scripts/wecom-sync.js init <docid>   （一次性接管）\n` +
+    `  只读命令（status / feedback / checkip）不受影响。`);
+  return cfg;
+}
+
+/** 写操作首行横幅：把「我在写哪张表」打出来（可见性 > 拦截） */
+function targetLine(cfg) {
+  return `目标表: env=${envOf()} host=${os.hostname()} docid=${(cfg.docid || '').slice(0, 12)}… | ${cfg.url || '(无 url)'}`;
 }
 
 // ── access_token（缓存 + 提前 5 分钟刷新）──
@@ -177,4 +222,4 @@ const webhook = {
   }
 };
 
-module.exports = { api, getToken, cred, loadEnv, readCfg, writeCfg, sheet, webhook, V, plain, CFG_FILE };
+module.exports = { api, getToken, cred, loadEnv, readCfg, writeCfg, cfgFile, envOf, guardWrite, targetLine, sheet, webhook, V, plain };

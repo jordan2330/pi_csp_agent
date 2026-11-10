@@ -20,7 +20,7 @@ description: 亚硝胺药物商机发掘场景。从FDA页面抓取亚硝胺杂�
 - WSL 为 mirrored 网络模式（`.wslconfig` → `networkingMode=mirrored`），且 playwright 库已安装（`skills/browser_executor/scripts/` 下 `npm i`）
 - `DASHSCOPE_API_KEY` 已配置
 - **企微自建应用已配置**（交付物为智能表格，v5.0.0 起取代 Excel）：`.env` 填 `WECOM_CORPID`/`WECOM_SECRET`（模板见 `.env.example`）；管理后台已做三件事：创建自建应用、把应用加入「协作-文档-API】可调用接口的应用」、把运行环境出口 IP 加入应用「企业可信IP」
-- 首次运行前先初始化表格：`node scripts/wecom-sync.js init`（幂等）；换网络/IP 变动报 60020 时跑 `node scripts/wecom-sync.js checkip` 查出需加白名单的 IP；**换机/多机接入已有表**：`init <docid> [url]` 或拷贝 `config/wecom.json`（见 README「多机部署」——绝不能盲跑 init 建第二张表）
+- 首次运行前先初始化表格：`node scripts/wecom-sync.js init`（幂等）；换网络/IP 变动报 60020 时跑 `node scripts/wecom-sync.js checkip` 查出需加白名单的 IP；**换机/多机接入已有表**：`init <docid> [url]` 或拷贝 `config/wecom.json`（见 README「多机部署」——绝不能盲跑 init 建第二张表）；**开发机必须 `WECOM_ENV=dev`**（否则默认 prod 直写生产表），`WECOM_ENV=dev node scripts/wecom-sync.js init` 会建独立的「CSP商机跟踪-dev」表
 - 原因：CDT 已启用瑞数动态安全（JS 质询 + 指纹检测），headless/自动化浏览器会被拦，必须用真实 Chrome
 
 ---
@@ -269,7 +269,7 @@ tail -20 output/runs/pipeline.log
 - 从 `config/fda_nitrosamines.json` 生成快照到 `output/runs/YYYY-MM-DD.json`
 - **沉淀账本（`scripts/lib/history.js`）**：`output/history/ledger.json`（每条商机 first_seen/last_seen，重扫不重置）+ `runs.json`（批次档案，由 `wecom-sheet.js sync` 写入以保证 ★ 口径单一权威）；缓存里消失的历史行以 `archived:true` 并入快照
 - **交付物 = 企微智能表格「CSP商机跟踪」**（`scripts/lib/wecom-sheet.js`，v5.0.0 起取代 Excel；销售收藏一个链接，永远看到最新全量）
-  - **首次初始化**（一次性，幂等）：`node scripts/wecom-sync.js init` —— 创建智能表格 + 37 字段（含反馈 4 列、系统留痕 4 列），docid 存 `config/wecom.json`（gitignore）；建好后把销售加为可编辑协作者（`members` 逻辑见 `scripts/wecom-poc.js`，或直接在企微里分享）。接入已有表（`init <docid>`）时**不会删除表内任何记录**：默认空行清理只在新建表时执行
+  - **首次初始化**（一次性，幂等）：`node scripts/wecom-sync.js init` —— 创建智能表格 + 37 字段（含反馈 4 列、系统留痕 4 列），docid 存 `config/wecom.json`（gitignore）；**开发机必须 `WECOM_ENV=dev`**（`WECOM_ENV=dev node scripts/wecom-sync.js init` 建「CSP商机跟踪-dev」，配置写 `config/wecom.dev.json`；不设环境变量 = prod，会直写生产表）；建好后把销售加为可编辑协作者（`members` 逻辑见 `scripts/wecom-poc.js`，或直接在企微里分享）。接入已有表（`init <docid>`）时**不会删除表内任何记录**：默认空行清理只在新建表时执行
   - **每次运行自动同步**（Phase 3 尾部，`sync()`）：新商机 `add_records`；已有行**只写变化的字段**（`update_records` 字段级合并——PoC 已验证，**反馈列永不被 pipeline 覆盖**）；★ 行 checkbox 置位
   - **表内容口径（v5.0.0-rc.2）**：**表 = 窗口内活跃商机 ∪ 有反馈的线索**（销售跟过的不消失）；出窗口且无反馈 / 归档行自动 `delete_records` 移出表（本地账本留档全量）。归档行仅有账本元信息（无联系方式/剂型），对销售无价值——2026-10-10 审计：243 条归档行联系方式覆盖 0%
   - **删除护栏**：`keep` 不足表内现有行的 50% 时 `sync` 拒绝写入并抛错（采集失败会把表批量删空）；确属窗口调整或首次收窄时用 `WECOM_ALLOW_SHRINK=1` 重跑
