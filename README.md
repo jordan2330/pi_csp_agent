@@ -114,6 +114,8 @@ WECOM_ENV=dev node scripts/wecom-sync.js init
 
 配置里的 `host` 也参与校验：把生产 `config/wecom.json` 拷到另一台机器后直接 `sync` 会被拒绝（目标表由主机「旧机」创建）。本机**确为新的生产机**时用 `WECOM_ADOPT=1 node scripts/wecom-sync.js init <docid>` 一次性接管；只读命令（`status` / `feedback` / `checkip`）不受任何拦截。
 
+**群机器人通知同理只在 `prod` 发送**：dev/test 环境就算 `.env` 里带着同一个 `WECOM_WEBHOOK_KEY`（`scp` 来的），也会打一行「群通知已跳过」后不推 —— 否则开发机每跑一次就往销售群里发一次假「本次新增」。想测推送格式用 `node scripts/wecom-poc.js webhook`（手动、一次性）。
+
 ⚠️ **唯一残洞**：开发机上不设 `WECOM_ENV`，且生产机的 `config/wecom.json` 还没补章（v5.2.0 之后跑过一次 `init`）——此时开发机的 dev 身份无从识别，仍会写生产表。做法：生产机先跑一次 `init` 补章，开发机 `echo 'WECOM_ENV=dev' >> .env`。
 
 ## 运行模式

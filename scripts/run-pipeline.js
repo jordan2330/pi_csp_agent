@@ -642,6 +642,9 @@ async function notifyGroup(r) {
   try {
     const wecom = require(path.join(__dirname, 'lib', 'wecom.js'));
     wecom.loadEnv();
+    // 只 prod 推送：dev/test 也能读到同一个 WECOM_WEBHOOK_KEY（.env 是拷来的），不拦会往销售群里发假新增
+    const env = wecom.envOf();
+    if (env !== 'prod') { log(`群通知已跳过（WECOM_ENV=${env}，只有 prod 环境推送群）`); return; }
     if (!process.env.WECOM_WEBHOOK_KEY) return;
     const lines = [
       `**CSP 商机更新 ${todayStr}**`,
@@ -724,7 +727,7 @@ async function main() {
   log(`║ CDT:    ${cdtStats.done} APIs, ${cdtStats.totalTrials} new, ${cdtStats.skippedNoNew} 无新增, ${cdtStats.errors} errors`);
   let sheetUrl = '';
   // 按 WECOM_ENV 读对应环境的配置（dev 上不会把生产表链接打进日志）
-  try { sheetUrl = require(path.join(__dirname, 'lib', 'wecom.js')).readCfg().url || ''; } catch (_) {}
+  try { sheetUrl = require(path.join(__dirname, 'lib', 'wecom.js')).readCfg().url || ''; } catch { /* 未初始化 → 留空 */ }
   log(`║ 交付物: 智能表格 ${sheetUrl || '(未初始化，先跑 node scripts/wecom-sync.js init)'}`);
   log('╚══════════════════════════════════════╝');
 }
