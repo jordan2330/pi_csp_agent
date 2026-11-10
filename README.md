@@ -40,8 +40,8 @@
 ## 快速开始
 
 ```bash
-# 1. 克隆仓库（v4 分支 = v5.0.0 智能表格版；master/v3 是旧 Excel 版）
-git clone -b v4 https://github.com/jordan2330/pi_csp_agent.git
+# 1. 克隆仓库（默认分支 master = 当前稳定基线 v5.1.1；v4 分支已冻结在 v5.0.0，仅存档）
+git clone https://github.com/jordan2330/pi_csp_agent.git
 cd pi_csp_agent
 
 # 2. 安装依赖（只装 playwright 库，不下载浏览器 —— 浏览器用 Windows 上的 Chrome）
