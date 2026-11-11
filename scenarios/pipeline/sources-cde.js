@@ -22,6 +22,7 @@ const fs = require('fs');
 const path = require('path');
 const C = require(path.join(__dirname, '..', '..', 'scripts', 'lib', 'cde-classify'));
 const scoring = require('./scoring');
+const scope = require('./scope');
 
 const WS = path.resolve(__dirname, '..', '..');
 const CURSOR_FILE = path.join(WS, 'config', 'pipeline-cursor.json');
@@ -37,17 +38,7 @@ const TODAY = new Date().toISOString().slice(0, 10);
 const CUTOFF = new Date(Date.now() - LOOKBACK_DAYS * 864e5).toISOString().slice(0, 10);
 const log = (...a) => console.log(...a);
 
-// ── 候选过滤：只要 CSP 能力圈内的新药/改良型 ──
-// drugType 自带「化药/中药/治疗用生物制品/预防用生物制品/体外试剂」→ 生物药在这个层面就出局（G1）
-const IN_SCOPE_TYPE = /^(化药|中药)/;
-const NEW_DRUG_CLASS = /^(1|2)(\.[0-9])?$/;        // 1 / 2.1-2.4（CDE 有的带「类」后缀有的不带，先剥掉）
-
-function isCandidate(r) {
-  if (!IN_SCOPE_TYPE.test(r.drugType || '')) return false;
-  if (/原料药|中间体/.test(r.regClass || '')) return false;
-  const cls = String(r.regClass || '').replace(/类$/, '');
-  return NEW_DRUG_CLASS.test(cls) || r.applyType === '新药';
-}
+// 口径统一在 scope.js（化药 + 1/2.x 类 + 新药|进口；中药/补充申请不进池）
 
 // ── 翻页（layui）──
 async function nextPage(page) {
@@ -98,10 +89,10 @@ async function nextPage(page) {
 
     for (const x of rows) {
       if (x.date < stopAt) { stopReason = `到达游标/回填边界（${x.date} < ${stopAt}）`; break; }
-      if (!isCandidate(x)) continue;
+      if (!scope.inScope(x)) continue;
       for (const co of String(x.company || '').split(/[;；]/).map(s => s.trim())
         .filter(co => co.length >= 2 && !/^(无|不适用|N\/A|-|\/)$/i.test(co))) {
-        const key = `${co}|${x.drugName}`;
+        const key = `${scope.companyKey(co)}|${scope.normalize(x.drugName)}`;
         const old = picked.get(key);
         if (!old || x.date > old.lastSeen) picked.set(key, { ...x, company: co, firstSeen: old ? old.firstSeen : x.date, lastSeen: x.date });
       }
