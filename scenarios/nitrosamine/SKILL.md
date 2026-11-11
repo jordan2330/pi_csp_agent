@@ -60,7 +60,22 @@ description: 亚硝胺药物商机发掘场景。从FDA页面抓取亚硝胺杂�
 
 ### 完整采集（仅首次或缓存失效时）
 
-#### FDA 页面 URL
+#### 首选：一条命令（不需要浏览器 / playwright / LLM）
+
+```bash
+node scripts/fda-refresh.js             # 刷新并落盘（页面无变化则不写）
+node scripts/fda-refresh.js --dry-run   # 只看差异
+```
+
+- 该页整张表都在静态 HTML 里，直取即可，无需真实 Chrome
+- **只更新元信息**（api 列表 / `potency_category` / `ai_limit` / `nitrosamines` / `fda_page_version` / `last_updated`），每个 API 的 `results`（CT.gov 缓存）、`last_cdt_regno`（CDT 游标）、`fda_detected_at` **原样保留** → 不影响增量采集
+- 内置安全阀（任一命中即退出、不写文件）：抓取失败 / 解析 0 行 / API 数比现有少 20% / 页头版本取不到 / pipeline 正在运行 / 现有缓存损坏
+- 落盘前自动备份到 `output/runs/fda-backups/`（保留最近 5 份）
+- 新增 API 若有缺中文名，日志会打「⚠️ 新增且缺中文名」，需人工补 `config/api_translations.json`（补之前 Phase 2 会跳过这些 API）
+
+#### 退路：浏览器逐行提取（页面改版导致上面的脚本解析失败时）
+
+FDA 页面 URL：
 
 ```
 https://www.fda.gov/regulatory-information/search-fda-guidance-documents/cder-nitrosamine-impurity-acceptable-intake-limits#predicted

@@ -145,7 +145,7 @@ node scripts/run-pipeline.js nitrosamine    # 完成后自动改回 incremental
 
 pipeline 整条链路（CT.gov REST → CDT 浏览器采集 → CDE 富化 → 智能表格同步 → 群推送）**零 LLM 依赖**：不消耗 token、不需要 `DASHSCOPE_API_KEY`、不需要 pi。
 
-前置只有一条：`config/fda_nitrosamines.json` 必须存在（首次部署由 pi 或人工按 SKILL.md Phase 1 采集生成；之后 FDA 页面季度性更新时用 pi 刷新一次即可）。
+前置只有一条：`config/fda_nitrosamines.json` 必须存在（首次部署用 `node scripts/fda-refresh.js` 生成；之后 FDA 页面季度性更新时同样一条命令刷新 —— 只改元信息，`results` 与 CDT 游标原样保留，不影响增量采集。页面改版导致解析失败时，按 SKILL.md Phase 1「退路」用浏览器提取）。
 
 ### 交互运行（开发 / 调试 / FDA 采集 / 页面改版适配）—— pi
 
