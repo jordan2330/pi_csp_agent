@@ -256,7 +256,8 @@ async function initSheet(docName = DEFAULT_DOC_NAME, existingDocid, existingUrl)
   }
 
   const have = new Set(((await W.sheet.getFields(docid, sheetId)).fields || []).map(f => f.field_title));
-  const missing = SCHEMA.filter(f => !have.has(f.field_title));
+  // add_fields 是前插 → 按 SCHEMA 倒序添加，UI 左→右才是销售阅读顺序（同 reorder）
+  const missing = SCHEMA.filter(f => !have.has(f.field_title)).reverse();
   if (missing.length) {
     await W.sheet.addFields(docid, sheetId, missing);
     log(`已添加 ${missing.length} 个字段`);
@@ -337,7 +338,7 @@ async function sync(snapshot, scenario, isFull, meta = {}) {
     try {
       const cdeProducts = Object.values(require('./cde-classify').loadCache().products || {});
       cdeStat = { total: cdeProducts.length, signals: cdeProducts.filter(e => e.confidence === 'high').length };
-    } catch (_) {}
+    } catch { /* CDE 缓存不可用时统计留空 */ }
     hist.appendRun({
       run: meta.run || `${ctx.today} (重建)`, date: meta.date || ctx.today,
       new: newRows, new_records: meta.new_records != null ? meta.new_records : newRows,
