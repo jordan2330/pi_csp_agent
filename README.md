@@ -36,7 +36,7 @@ node scripts/wecom-sync.js reorder    # 只有改了字段/顺序才跑（破坏
 - **cdt-search-lib.js / browser.js** 是手：通过 CDP 连接 Windows 侧真实 Chrome 操作网页（端点由 `scripts/browser-connect.js` 解析）
 - **为什么必须真浏览器**：chinadrugtrials 已启用瑞数动态安全（JS 质询 + 浏览器指纹检测），headless/自动化浏览器会被拦截；早期用远程 browserless（机房 IP + 自动化指纹）已被封禁
 - **scenarios/** 是业务逻辑：每个场景一个独立 Skill，可插拔
-- **企微智能表格**是唯一交付物（v5.0.0 起）：pipeline 同步；销售在同一链接看到最新线索并填跟进反馈（状态/负责人/备注）→ 每次同步回流 feedback.json 账本
+- **企微智能表格**是唯一交付**形态**（v5.0.0 起）：pipeline 同步；销售在同一链接看到最新线索并填跟进反馈（状态/负责人/备注）→ 每次同步回流 feedback.json 账本。**每场景一张表**（现有「CSP商机跟踪」；未来的管线/交易场景将另建「CSP管线商机」，不复用现有 37 列）
 
 ## 前置要求
 
