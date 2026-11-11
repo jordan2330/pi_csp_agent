@@ -23,10 +23,14 @@ const UA = { 'user-agent': 'pi-csp-agent/1.0 (internal sales-lead research)' };
 const log = (...a) => console.log(...a);
 
 // 代号提取：HRS-2329 / N2103 / RO7795068 / MRO-001HS / EP-0330SP / APG-3288
-const codeOf = (drugName) => {
+const FORM_WORD = /^(tablet|capsule|injection|solution|suspension|granule|powder|spray|gel|cream|inhaler|patch|emulsion|syrup)$/i;
+const keyOf = (drugName) => {
   const s = String(drugName || '');
-  const m = s.match(/[A-Za-z]{1,6}[-‐]?\d{2,8}[A-Za-z]{0,4}|[A-Za-z]{3,}[-‐][A-Za-z0-9]{2,}/);
-  return m ? m[0].replace(/[-‐]$/, '') : null;
+  const c = s.match(/[A-Za-z]{1,6}[-‐]?\d{2,8}[A-Za-z]{0,4}|[A-Za-z]{3,}[-‐][A-Za-z0-9]{2,}/);
+  if (c) return { key: c[0].replace(/[-‐]$/, ''), type: 'code' };
+  const w = s.match(/[A-Za-z]{4,}/g);
+  const inn = w && w.find(x => !FORM_WORD.test(x));
+  return inn ? { key: inn, type: 'inn' } : null;
 };
 const rank = (p) => /PHASE3/i.test(p) ? 3 : /PHASE2/i.test(p) ? 2 : /PHASE1|EARLY_PHASE1/i.test(p) ? 1 : 0;
 const phaseLabel = (r) => r === 3 ? 'III期' : r === 2 ? 'II期' : r === 1 ? 'I期' : '';
@@ -37,13 +41,15 @@ const phaseLabel = (r) => r === 3 ? 'III期' : r === 2 ? 'II期' : r === 1 ? 'I�
   const rows = Object.entries(store.rows || {});
   const byCode = new Map();                    // code → [keys]
   for (const [k, r] of rows) {
-    const c = codeOf(r.drugName);
-    if (!c) continue;
-    if (!byCode.has(c)) byCode.set(c, []);
-    byCode.get(c).push(k);
+    if (r.phase && r.phase_src) continue;          // 已有期次，跳过（重复跑不重查）
+    const hit = keyOf(r.drugName);
+    if (!hit) continue;
+    if (!byCode.has(hit.key)) byCode.set(hit.key, { type: hit.type, rows: [] });
+    byCode.get(hit.key).rows.push(k);
   }
   const codes = [...byCode.keys()].slice(0, LIMIT);
-  log(`待查代号 ${codes.length}（总 ${byCode.size}），覆盖 ${codes.reduce((n, c) => n + byCode.get(c).length, 0)} 行`);
+  const nRows = codes.reduce((n, c) => n + byCode.get(c).rows.length, 0);
+  log(`待查检索键 ${codes.length}（总 ${byCode.size}），覆盖 ${nRows} 行 | 代号 ${codes.filter(c => byCode.get(c).type === 'code').length} / INN ${codes.filter(c => byCode.get(c).type === 'inn').length}`);
 
   let hit = 0, done = 0, errors = 0;
   for (const code of codes) {
@@ -79,10 +85,10 @@ const phaseLabel = (r) => r === 3 ? 'III期' : r === 2 ? 'II期' : r === 1 ? 'I�
       if (errors <= 3) log(`  ⚠️ ${code}: ${e.message}`);
     }
     if (best && best.rank > 0) hit++;
-    for (const k of byCode.get(code)) {
+    for (const k of byCode.get(code).rows) {
       store.rows[k].phase = best ? phaseLabel(best.rank) : '';
       store.rows[k].phase_rank = best ? best.rank : 0;
-      store.rows[k].phase_src = best && best.rank ? 'CT.gov(干预名精确)' : '';
+      store.rows[k].phase_src = best && best.rank ? `CT.gov(干预名精确/${byCode.get(code).type})` : '';
       store.rows[k].nct = best ? (best.ncts[0] || '') : '';
     }
     done++;
