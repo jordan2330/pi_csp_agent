@@ -32,3 +32,6 @@ config/.wecom_token.json
 output/history/
 .tmp/
 output/CSP_Leads_Report_EN.xlsx
+
+# 管线场景运行时状态（游标 + 采集结果）
+config/pipeline-cursor.json
