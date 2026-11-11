@@ -29,6 +29,7 @@ const OUT_FILE = path.join(WS, 'output', 'history', 'pipeline-cde.json');
 const PAGE_SIZE = 50;
 const arg = (n, d) => { const i = process.argv.indexOf(n); return i !== -1 && process.argv[i + 1] ? Number(process.argv[i + 1]) : d; };
 const MAX_PAGES = arg('--max-pages', 200);
+const START_PAGE = arg('--start-page', 1);      // 续回填：直接从第 N 页开始，不必重扫前面
 const LOOKBACK_DAYS = arg('--lookback-days', 365);
 const NO_SAVE = process.argv.includes('--no-save');
 const FROM = (() => { const i = process.argv.indexOf('--from'); return i !== -1 ? process.argv[i + 1] : null; })();   // 显式起点：继续回填历史用
@@ -70,6 +71,17 @@ async function nextPage(page) {
   await C.openForm(page);
   await C.setPageSize(page, PAGE_SIZE);
   await page.waitForTimeout(2000);
+  if (START_PAGE > 1) {
+    const jumped = await page.evaluate((n) => {
+      const inp = document.querySelector('.layui-laypage-skip input');
+      const btn = document.querySelector('.layui-laypage-skip button');
+      if (!inp || !btn) return 'no-skip';
+      inp.value = String(n); inp.dispatchEvent(new Event('input', { bubbles: true })); btn.click(); return 'ok';
+    }, START_PAGE);
+    log(`跳到第 ${START_PAGE} 页: ${jumped}`);
+    if (jumped !== 'ok') process.exit(1);
+    await page.waitForTimeout(3000);
+  }
 
   const picked = new Map();     // key → row
   let scanned = 0, pages = 0, firstMaxDate = null, lastPageMax = null, stopReason = '';
@@ -103,7 +115,7 @@ async function nextPage(page) {
   log(`翻页 ${pages} 页 | 扫描 ${scanned} 行 | 候选（公司×资产）${picked.size} | 停止原因: ${stopReason}`);
 
   // ── 自检：首页最新日期必须 ≥ 游标（否则说明游标比页面还新，可能是页面回滚/改版）──
-  if (prev.last_date && firstMaxDate && firstMaxDate < prev.last_date) {
+  if (START_PAGE === 1 && prev.last_date && firstMaxDate && firstMaxDate < prev.last_date) {
     console.error(`❌ 首页最新受理日 ${firstMaxDate} 早于游标 ${prev.last_date} —— 列表未更新或页面改版，拒绝推进游标`);
     process.exit(1);
   }
