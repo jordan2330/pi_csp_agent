@@ -1,9 +1,20 @@
 # Pi CSP Agent — 亚硝胺商机发掘
 
-> ✅ **当前稳定基线：`v5.1-stable`**（2026-10-27）—— 版本索引与标记约定见 [CHANGELOG.md](CHANGELOG.md)
+> ✅ **当前稳定基线：以 [CHANGELOG.md](CHANGELOG.md)「当前稳定基线」为准**（现为 v5.1.1；v5.2.0 环境隔离待生产验证）
 > （开发单线在 `master` 上进行，master 即正式版；Excel 交付时代（v4.2-stable）仅存 tag）
 
 基于 [Pi Coding Agent](https://pi.dev) 的 CSP（Aptar 活性包装）销售商机自动发掘系统。Agent 自动抓取 FDA 亚硝胺杂质风险 API 列表，逐一在中国药物临床试验登记平台搜索相关临床试验，匹配客户画像，同步到**企微智能表格**（含 CSP 产品推荐与销售反馈回路）。
+
+## 日常只需要这三条
+
+```bash
+git pull                              # 生产机：拉最新代码
+node scripts/wecom-sync.js status     # 看表现在怎么样（只读，随时可跑）
+node scripts/wecom-sync.js reorder    # 只有改了字段/顺序才跑（破坏性：删字段重建，反馈自动备份回写）
+```
+
+其余全自动：定时任务只跑 `node scripts/run-pipeline.js nitrosamine`（内部调 `sync`）。
+**`init` 只用两件事**：第一次建表、换机补章。开发机隔离见「多机部署 / 换机迁移 → 环境隔离」。
 
 ## 架构概览
 
