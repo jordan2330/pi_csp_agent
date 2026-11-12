@@ -53,6 +53,33 @@ function phaseScore(phaseText = '') {
   return { score: 0, phase: null };             // 无期次信息：0 分，不算出局
 }
 
+// ── D5 事件强度（期次 + 受理号类型 + 近期动态）──
+// 受理号第 4 位：L=临床试验申请（IND）、S=上市申请（NDA）；具体见 CXHL/CXHS/JXHL/JXHS
+function eventScore({ regNo = '', applyType = '', phaseRank = 0, lastSeen = '' }) {
+  const reasons = [];
+  const isNda = /^[A-Z]{3}S/.test(String(regNo));
+  const isInd = /^[A-Z]{3}L/.test(String(regNo));
+  let score = 0;
+  if (phaseRank >= 3 || isNda) { score = 3; reasons.push(isNda ? 'NDA 已受理' : 'III期/关键临床'); }
+  else if (phaseRank === 2) { score = 2; reasons.push('II期'); }
+  else if (phaseRank === 1 || isInd) { score = 1; reasons.push(isInd ? 'IND 已受理' : 'I期'); }
+  if (!score) reasons.push('无阶段信号');
+  return { score, reasons };
+}
+
+// ── D6 决策权归属（申请人是否中国主体）──
+// 进口申请（J 开头）的持证人多在境外；在华子公司含 (China)/(中国) 时视为有本地决策
+function decisionScore({ company = '', regNo = '' }) {
+  const cn = /[\u4e00-\u9fff]/.test(company);
+  const legal = /(有限公司|股份有限公司|药业|制药|医药|生物)/.test(company);
+  const localBranch = /[（(]\s*(中国|China)\s*[）)]|China/i.test(company);
+  const imported = /^J/.test(String(regNo));
+  if (cn && legal && !/^(中国|China)/i.test(company)) return { score: 3, reason: '中国主体（自有持证）' };
+  if (!cn && localBranch) return { score: 2, reason: '外企在华子公司' };
+  if (!cn) return { score: 1, reason: '境外主体（决策多在海外）' };
+  return { score: 2, reason: '中文主体（持证身份待确认）' };
+}
+
 // ── 闸门 ──
 function gates({ drugName = '', regClass = '', drugClass = '' }) {
   if (G1_FORM.test(drugName) || G1_CLASS.test(drugClass)) return { excluded: true, gate: 'G1-形态不符（CSP 无产品线）' };
@@ -63,7 +90,7 @@ function gates({ drugName = '', regClass = '', drugClass = '' }) {
 // ── 分档（阈值随可算维度缩放）──
 const MODES = {
   lite: { dims: ['D1', 'D2', 'D3'], max: 15, tiers: [[11, 'A'], [8, 'B'], [5, 'C']] },
-  full: { dims: ['D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7'], max: 27, tiers: [[20, 'A'], [14, 'B'], [9, 'C']] }
+  full: { dims: ['D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7'], max: 27, tiers: [[15, 'A'], [12, 'B'], [9, 'C']] }   // D4/D7 暂无数据源 → 实际上限 21；阈值按 1125 行真实分布校准：A 92 / B 284 / C 329 / D 420
 };
 
 function tierOf(points, mode = 'lite') {
@@ -84,15 +111,20 @@ function score(row = {}, opts = {}) {
   const D2 = physchemScore(row);
   const D3 = phaseScore(row.phase);
   const dims = { D1: D1.score, D2: D2.score, D3: D3.score };
+  const notes = [...D2.reasons];
   let points = 2 * D1.score + 2 * D2.score + D3.score;
 
   if (mode === 'full') {
-    for (const k of ['d4', 'd5', 'd6', 'd7']) {
+    const D5 = eventScore({ regNo: row.regNo, applyType: row.applyType, phaseRank: D3.score, lastSeen: row.lastSeen || row.last_seen });
+    const D6 = decisionScore({ company: row.company, regNo: row.regNo });
+    dims.D5 = D5.score; dims.D6 = D6.score;
+    points += D5.score + D6.score;
+    notes.push(`D5=${D5.score}(${D5.reasons.join('/')})`, `D6=${D6.score}(${D6.reason})`);
+    for (const k of ['d4', 'd7']) {                       // 暂无可靠数据源 → 传了才算
       const v = row[k];
       if (typeof v === 'number') { dims[k.toUpperCase()] = v; points += v; }
     }
   }
-  const notes = [...D2.reasons];
   if (!D1.form) notes.push('剂型待定（降权，不丢弃）');
   return { excluded: false, gate: null, points, max: MODES[mode].max, tier: tierOf(points, mode), dims, notes, form: D1.form, phase: D3.phase };
 }

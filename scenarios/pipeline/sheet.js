@@ -173,7 +173,9 @@ function checkRows(rows) {
   const bad = [];
   for (const r of rows) {
     if (!r.key || !/^PIPE\|.+\|.+$/.test(r.key)) bad.push([r.key, '商机键格式']);
-    if (r.points !== 2 * (r.dims?.D1 ?? 0) + 2 * (r.dims?.D2 ?? 0) + (r.dims?.D3 ?? 0)) bad.push([r.key, '总分与三维之和不符']);
+    const expect = 2 * (r.dims?.D1 ?? 0) + 2 * (r.dims?.D2 ?? 0) + (r.dims?.D3 ?? 0)
+      + (r.dims?.D4 ?? 0) + (r.dims?.D5 ?? 0) + (r.dims?.D6 ?? 0) + (r.dims?.D7 ?? 0);
+    if (r.points !== expect) bad.push([r.key, `总分=${r.points} 与各维之和=${expect} 不符`]);
     if (r.phase && (r.dims?.D3 ?? 0) === 0) bad.push([r.key, `有期次(${r.phase})但 D3=0`]);
     if (!r.phase && (r.dims?.D3 ?? 0) > 0) bad.push([r.key, '无期次但 D3>0']);
   }

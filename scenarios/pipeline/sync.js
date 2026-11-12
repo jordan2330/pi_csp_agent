@@ -35,7 +35,10 @@ const log = (...a) => console.log(...a);
   }
   const all = Object.values(store.rows || {});
   const scored = all.map(r => {
-    const s = scoring.score({ drugName: r.drugName, regClass: r.regClass, phase: r.phase || '' });
+    const s = scoring.score({
+      drugName: r.drugName, company: r.company, regClass: r.regClass, phase: r.phase || '',
+      regNo: r.regNo, applyType: r.applyType, lastSeen: r.last_seen
+    }, { mode: 'full' });
     return { ...r, ...s, key: `PIPE|${r.company}|${r.drugName}` };
   });
   const out = scored.filter(r => !r.excluded && TIERS.includes(r.tier));
