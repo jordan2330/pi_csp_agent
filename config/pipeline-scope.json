@@ -1,0 +1,7 @@
+{
+  "_comment": "队列口径（改这里即改采集/裁剪规则；scope.js 是唯一消费者）。exclude_import=true → 只保留国产受理号（C 开头），排除进口（J 开头）的境外主体资产。",
+  "drug_type": "化药",
+  "apply_type": ["新药", "进口"],
+  "reg_class": ["1", "2.x"],
+  "exclude_import": true
+}

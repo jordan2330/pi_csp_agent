@@ -22,14 +22,21 @@ const WS = path.resolve(__dirname, '..', '..');
 const STORE = path.join(WS, 'output', 'history', 'pipeline-cde.json');
 const ALIAS_FILE = path.join(WS, 'config', 'company-aliases.json');
 
+function loadScope() {
+  try { return JSON.parse(fs.readFileSync(path.join(WS, 'config', 'pipeline-scope.json'), 'utf8')); }
+  catch { return { drug_type: '化药', apply_type: ['新药', '进口'], reg_class: ['1', '2.x'], exclude_import: false }; }
+}
 const IN_SCOPE_TYPE = '化药';
 const APPLY = new Set(['新药', '进口']);
 const NEW_CLASS = /^(1|2)(\.[0-9])?$/;
 const PLACEHOLDER = /^(无|不适用|N\/A|-|\/|—)$/i;
 
 function inScope(r) {
+  const cfg = loadScope();
   if ((r.drugType || '') !== IN_SCOPE_TYPE) return false;
-  if (!APPLY.has(r.applyType)) return false;
+  if (!new Set(cfg.apply_type || ['新药', '进口']).has(r.applyType)) return false;
+  // 进口受理号（J 开头）= 境外主体持证资产，不是我们要跟的中国自研/自产机会
+  if (cfg.exclude_import && /^J/.test(String(r.regNo || ''))) return false;
   if (PLACEHOLDER.test(String(r.company || '').trim())) return false;
   const cls = String(r.regClass || '').replace(/类$/, '');
   return NEW_CLASS.test(cls);
@@ -83,7 +90,8 @@ if (require.main === module) {
   // 口径自检
   assert.equal(inScope({ drugType: '化药', applyType: '新药', regClass: '1类', company: 'X药业' }), true);
   assert.equal(inScope({ drugType: '化药', applyType: '新药', regClass: '2.4', company: 'X药业' }), true);
-  assert.equal(inScope({ drugType: '化药', applyType: '进口', regClass: '1', company: 'X Pharma' }), true);
+  assert.equal(inScope({ drugType: '化药', applyType: '进口', regClass: '1', company: 'X Pharma', regNo: 'JXHL2600001' }), false);   // 进口已按 config 排除
+  assert.equal(inScope({ drugType: '化药', applyType: '进口', regClass: '1', company: 'X药业', regNo: 'CXHL2600001' }), true);
   assert.equal(inScope({ drugType: '中药', applyType: '新药', regClass: '1.1类', company: 'X药业' }), false);
   assert.equal(inScope({ drugType: '化药', applyType: '补充申请', regClass: '1类', company: 'X药业' }), false);
   assert.equal(inScope({ drugType: '化药', applyType: '新药', regClass: '3类', company: 'X药业' }), false);
