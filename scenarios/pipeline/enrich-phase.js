@@ -41,7 +41,7 @@ const phaseLabel = (r) => r === 3 ? 'III期' : r === 2 ? 'II期' : r === 1 ? 'I�
   const rows = Object.entries(store.rows || {});
   const byCode = new Map();                    // code → [keys]
   for (const [k, r] of rows) {
-    if (r.phase && r.phase_src) continue;          // 已有期次，跳过（重复跑不重查）
+    if (r.phase && r.phase_src && !process.argv.includes('--recheck')) continue;   // 已有期次默认跳过
     const hit = keyOf(r.drugName);
     if (!hit) continue;
     if (!byCode.has(hit.key)) byCode.set(hit.key, { type: hit.type, rows: [] });
@@ -52,49 +52,66 @@ const phaseLabel = (r) => r === 3 ? 'III期' : r === 2 ? 'II期' : r === 1 ? 'I�
   log(`待查检索键 ${codes.length}（总 ${byCode.size}），覆盖 ${nRows} 行 | 代号 ${codes.filter(c => byCode.get(c).type === 'code').length} / INN ${codes.filter(c => byCode.get(c).type === 'inn').length}`);
 
   let hit = 0, done = 0, errors = 0;
-  for (const code of codes) {
-    let best = null;
-    try {
-      const u = `https://clinicaltrials.gov/api/v2/studies?query.term=${encodeURIComponent(code)}`
-        + `&pageSize=30&fields=NCTId,Phase,LeadSponsorName,StudyFirstPostDate,InterventionName,BriefTitle`;
-      const res = await fetch(u, { headers: UA, signal: AbortSignal.timeout(20000) });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const j = await res.json();
-      const studies = (j.studies || []).map(s => s.protocolSection || {});
-      // 精确性关键：query.term 是全文检索，会把「别人家的同阶段试验」一起带回来 →
-      // 必须要求代号出现在本试验的干预名/标题里，否则期次会被系统性高估（实测 HRS-7058 被抬到 III 期）
-      const norm = (x) => String(x || '').toLowerCase().replace(/[-‐_\s]/g, '');
-      const codeN = norm(code);
-      const relevant = studies.filter(s => {
-        const iv = (s.armsInterventionsModule?.interventions || []).map(i => i.name).join(' ');
-        const ti = s.identificationModule?.briefTitle || '';
-        return norm(iv).includes(codeN) || norm(ti).includes(codeN);
-      });
-      let maxRank = 0, ncts = [], sponsors = new Set();
-      for (const s of relevant) {
-        const ph = (s.designModule?.phases || []).join(',');
-        const r = rank(ph);
-        if (r > maxRank) maxRank = r;
-        if (r > 0 && ncts.length < 3) ncts.push(s.identificationModule?.nctId);
-        const sp = s.sponsorCollaboratorsModule?.leadSponsor?.name;
-        if (sp) sponsors.add(sp);
+  const CONC = Math.max(1, arg('--concurrency', 5));
+  const RECHECK = process.argv.includes('--recheck');
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+  async function lookup(code) {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const u = `https://clinicaltrials.gov/api/v2/studies?query.term=${encodeURIComponent(code)}`
+          + `&pageSize=30&fields=NCTId,Phase,LeadSponsorName,StudyFirstPostDate,InterventionName,BriefTitle`;
+        const res = await fetch(u, { headers: UA, signal: AbortSignal.timeout(20000) });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const j = await res.json();
+        const studies = (j.studies || []).map(s => s.protocolSection || {});
+        // 精确性关键：query.term 是全文检索，会把「别人家的同阶段试验」一起带回来 →
+        // 必须要求代号出现在本试验的干预名/标题里，否则期次会被系统性高估（实测 HRS-7058 被抬到 III 期）
+        const norm = (x) => String(x || '').toLowerCase().replace(/[-‐_\s]/g, '');
+        const codeN = norm(code);
+        const relevant = studies.filter(s => {
+          const iv = (s.armsInterventionsModule?.interventions || []).map(i => i.name).join(' ');
+          const ti = s.identificationModule?.briefTitle || '';
+          return norm(iv).includes(codeN) || norm(ti).includes(codeN);
+        });
+        let maxRank = 0; const ncts = [];
+        for (const s of relevant) {
+          const r = rank((s.designModule?.phases || []).join(','));
+          if (r > maxRank) maxRank = r;
+          const nct = s.identificationModule?.nctId;
+          if (r > 0 && nct && ncts.length < 3) ncts.push(nct);
+        }
+        return { rank: maxRank, ncts, total: relevant.length };
+      } catch (e) {
+        if (/HTTP (429|5\d\d)/.test(e.message) && attempt < 3) { await sleep(1500 * attempt); continue; }
+        errors++;
+        if (errors <= 3) log(`  ⚠️ ${code}: ${e.message}`);
+        return null;
       }
-      best = { rank: maxRank, ncts: ncts.filter(Boolean), total: relevant.length, sponsors: [...sponsors].slice(0, 3) };
-    } catch (e) {
-      errors++;
-      if (errors <= 3) log(`  ⚠️ ${code}: ${e.message}`);
     }
-    if (best && best.rank > 0) hit++;
-    for (const k of byCode.get(code).rows) {
-      store.rows[k].phase = best ? phaseLabel(best.rank) : '';
-      store.rows[k].phase_rank = best ? best.rank : 0;
-      store.rows[k].phase_src = best && best.rank ? `CT.gov(干预名精确/${byCode.get(code).type})` : '';
-      store.rows[k].nct = best ? (best.ncts[0] || '') : '';
-    }
-    done++;
-    if (done % 20 === 0) log(`  …${done}/${codes.length}  命中 ${hit}  错误 ${errors}`);
-    await new Promise(r => setTimeout(r, 1200));     // CT.gov 自律限速
+    return null;
   }
+
+  // 并发池：CT.gov 未公布限速（官方另有 bulk 全量下载），保守用 5 并发 + 250ms 间隔
+  let next = 0;
+  async function worker() {
+    while (next < codes.length) {
+      const code = codes[next++];
+      const best = await lookup(code);
+      if (best && best.rank > 0) hit++;
+      for (const k of byCode.get(code).rows) {
+        if (!RECHECK && store.rows[k].phase && store.rows[k].phase_src) continue;
+        store.rows[k].phase = best ? phaseLabel(best.rank) : '';
+        store.rows[k].phase_rank = best ? best.rank : 0;
+        store.rows[k].phase_src = best && best.rank ? `CT.gov(干预名精确/${byCode.get(code).type})` : '';
+        store.rows[k].nct = best ? (best.ncts[0] || '') : '';
+      }
+      done++;
+      if (done % 40 === 0) log(`  …${done}/${codes.length}  命中 ${hit}  错误 ${errors}`);
+      await sleep(250);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(CONC, codes.length) }, () => worker()));
   log(`\n查询完成：${done} 个代号，命中期次 ${hit}（${(100 * hit / Math.max(1, done)).toFixed(0)}%），错误 ${errors}`);
 
   store.phase_updated_at = new Date().toISOString();
