@@ -37,7 +37,7 @@ const log = (...a) => console.log(...a);
   const scored = all.map(r => {
     const s = scoring.score({
       drugName: r.drugName, company: r.company, regClass: r.regClass, phase: r.phase || '',
-      regNo: r.regNo, applyType: r.applyType, lastSeen: r.last_seen
+      regNo: r.regNo, d7: r.d7
     }, { mode: 'full' });
     return { ...r, ...s, key: `PIPE|${r.company}|${r.drugName}` };
   });
