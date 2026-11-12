@@ -58,7 +58,9 @@ function envOf() {
 }
 function cfgFile() {
   const e = envOf();
-  return path.join(WS, 'config', e === 'prod' ? 'wecom.json' : `wecom.${e}.json`);
+  // WECOM_TABLE 可选第二轴：多场景各一张表（如 pipeline → config/wecom-pipeline.json）
+  const t = process.env.WECOM_TABLE ? `-${process.env.WECOM_TABLE.replace(/[^a-zA-Z0-9_-]/g, '')}` : '';
+  return path.join(WS, 'config', e === 'prod' ? `wecom${t}.json` : `wecom${t}.${e}.json`);
 }
 
 // ── 运行时资源（docid/sheet_id）：原子写，同 history.js 风格 ──

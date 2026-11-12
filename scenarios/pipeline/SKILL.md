@@ -80,6 +80,24 @@ node scenarios/pipeline/enrich-phase.js                 # 按药品代号挂期�
 | 医药魔方 / 药智 / Insights | 商业库 | ❌ 禁止爬（魔方有官方 MCP 授权通道，需商务） |
 | 上交所/深交所 | A 股公告 | ⚠️ 法律声明：商业牟利需书面许可 |
 
+## 交付层（M4 已落地）
+
+```bash
+node scenarios/pipeline/sync.js --init     # 首次建表（幂等，dev 环境自动命名 CSP管线商机-dev）
+node scenarios/pipeline/sync.js --dry-run  # 只看会写多少行
+node scenarios/pipeline/sync.js            # 同步 A/B 档（默认）
+```
+
+- 位置：`scenarios/pipeline/sheet.js`（20 列 SCHEMA + rowValues + scalarOf + 不变量自检 + 反馈拉回）/ `sync.js`（CLI）
+- 表选择：`WECOM_TABLE=pipeline` → `config/wecom-pipeline.json`（prod）/ `config/wecom-pipeline.dev.json`（dev），与主表配置互不干扰
+- 反馈账本独立：`output/history/feedback-pipeline.json`
+- 表内 = 档位 A/B ∪ 有反馈的行；缩表护栏、字段级合并（反馈 4 列销售独占）与主表同款
+
+**企微 API 两个必踩坑（实测）**
+
+1. **数值单元格必须写裸数字**：`{总分: 9}`。写 `[{type:'number',number:9}]` 或 `[{number:9}]` 都会静默丢弃（读回 undefined）。
+2. **URL 字段必须带 `property_url`**：`{type:'url', property_url:{type:'LINK_TYPE_ICON_TEXT'}}`，缺了报 `2022019 CheckAddFieldReq failed`；数值字段缺 `property_number` 报 `2022017`。
+
 ## 下一步（按顺序）
 
 1. **接通 D3**：CT.gov `query.lead=<企业>` 反查期次 + CDT 按药品名检索期次，把期次覆盖率从 10% 拉起来，再重跑回测校准阈值。

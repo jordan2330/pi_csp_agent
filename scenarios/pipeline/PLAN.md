@@ -64,12 +64,13 @@ scoring.js  D1 剂型 + D2 理化风险 + D3 期次  → 分数 + 档位
 - 未做：纯中文名 289 行（如「泽普昔替尼胶囊」）需 CDT 中文药名检索，单品种 ~40 秒，已列为 M3.5 可选项。
 - 验收：A 38 条 ≤120 ✅；抽验 LNK01001/HTD1801/TQH3906/HRS-7058/Giredestrant 均与 CT.gov 一致 ✅。
 
-### M4 第二张表「CSP管线商机」（1–1.5 天）
+### M4 第二张表「CSP管线商机」（✅ 已完成）
 
-- `scripts/lib/wecom-sheet-pipeline.js`：独立 SCHEMA（≤20 列）+ `rowValues` + `scalarOf` + 不变量自检 + 反馈拉回（照抄现有四件套纪律）。
-- `config/wecom-pipeline.json`（gitignore）+ `wecom-sync.js` 支持指定表（env + 表名两维）。
-- 列草案：商机键 / 公司 / 资产 / 注册分类 / 剂型 / 期次 / D1-D3 分 / 总分 / 档位 / 状态事件 / 最近事件日 / 首次发现 / 登记号 / 详情链接 / ★本次新增 / 反馈 4 列 / 系统列。
-- 验收：dev 表灌 50 行；重复跑幂等（0 新增 0 更新）；销售反馈能被拉回账本。
+- 落地位置改为 `scenarios/pipeline/sheet.js`（AGENTS.md 要求场景专属逻辑进 scenarios/，不放 `scripts/lib/`）+ `sync.js` CLI。
+- 20 列（判断价值 → 客户与资产 → 溯源 → 反馈 4 列），`rowValues`/`scalarOf`/不变量自检/反馈拉回四件套齐全；反馈账本独立为 `output/history/feedback-pipeline.json`。
+- 表选择加第二轴：`WECOM_TABLE=pipeline` → `config/wecom-pipeline[.env].json`（`wecom.js` 一处改动，主表零影响）。
+- dev 表：**371 行（A+B 档）**，字段顺序正确；重复跑 **0 新增 / 0 更新**（幂等）；缩表护栏继承。
+- 两个企微 API 坑（已写进 SKILL）：① 数值单元格必须写裸数字；② URL 字段必须带 `property_url`。
 
 ### M5 D4–D7 补齐（2–3 天，视数据源）
 
