@@ -138,6 +138,8 @@ node scenarios/pipeline/run.js --no-sync       # 只更新本地账本
 
 定时（与主表并列，择一）：`17 7 * * * cd <repo> && node scenarios/pipeline/run.js >> output/pipeline-cron.log 2>&1`
 
+单步墙钟上限 30 分钟（`PIPE_STEP_TIMEOUT_MIN` 可调）：卡住的步骤会被杀掉并记为失败，不会拖整晚。
+
 单步调试仍可直接跑各脚本（参数见各自头部注释）；`sync.js --init` 只用于首次建表。
 
 **表内口径**：档位 A/B ∪ 有反馈的行；`最近受理日 > 18 个月且无反馈` 自动移出（`PIPE_WINDOW_MONTHS` 可调）；有反馈的行永不删。

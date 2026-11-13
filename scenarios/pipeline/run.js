@@ -27,6 +27,8 @@ const log = (...a) => console.log(...a);
 const collectArgs = ['--from', '--start-page', '--max-pages', '--lookback-days'].flatMap((f) => (val(f) ? [f, val(f)] : []));
 const enrichArgs = has('--recheck') ? ['--recheck'] : [];
 const syncArgs = [has('--dry-run') ? '--dry-run' : null, val('--tiers') ? `--tiers=${val('--tiers')}` : null].filter(Boolean);
+// 无人值守也要有墙钟上限：单步卡住(CT.gov 限流、浏览器白屏)不能拖整晚
+const STEP_TIMEOUT_MS = Number(process.env.PIPE_STEP_TIMEOUT_MIN || 30) * 60000;
 
 const steps = [];
 if (!has('--skip-collect')) steps.push({ name: 'CDE 采集', script: 'sources-cde.js', args: collectArgs, required: false });
@@ -40,12 +42,12 @@ const results = [];
 for (const s of steps) {
   log(`\n═══ ${s.name}（${s.script}） ═══`);
   const t0 = Date.now();
-  const r = spawnSync(process.execPath, [path.join(__dirname, s.script), ...s.args], { cwd: WS, stdio: 'inherit' });
+  const r = spawnSync(process.execPath, [path.join(__dirname, s.script), ...s.args], { cwd: WS, stdio: 'inherit', timeout: STEP_TIMEOUT_MS });
   const sec = Math.round((Date.now() - t0) / 1000);
   const ok = r.status === 0;
   results.push({ name: s.name, ok, sec, required: s.required });
   if (!ok) {
-    const why = r.error ? r.error.message : `退出码 ${r.status}`;
+    const why = r.error?.code === 'ETIMEDOUT' ? `超时 ${STEP_TIMEOUT_MS / 60000} 分钟被终止` : (r.error?.message || `退出码 ${r.status}`);
     console.error(`⚠️ ${s.name} 失败（${why}，${sec}s）${s.required ? '' : ' —— 继续下一步'}`);
   }
 }
