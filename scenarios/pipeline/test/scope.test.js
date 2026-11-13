@@ -10,10 +10,13 @@ const { inScope, normalize, companyKey, loadAliases } = require('../scope');
 
 const base = { drugType: '化药', applyType: '新药', regClass: '1类', company: '江苏恒瑞医药股份有限公司' };
 
-test('inScope：化药 1/2.x 类新药进队列', () => {
-  assert.equal(inScope(base), true);
-  assert.equal(inScope({ ...base, regClass: '2.4' }), true);
-  assert.equal(inScope({ ...base, regClass: '2.2类' }), true);
+test('inScope：只有 1 类创新药进队列（2.x 改良型新药已收掉）', () => {
+  assert.equal(inScope(base), true, '1类');
+  assert.equal(inScope({ ...base, regClass: '1' }), true, '1（无“类”后缀）');
+  // 2026-11-11 口径再收：销售要求只留新药研发 pipeline（2.x 多为老药改剂型）
+  // config/pipeline-scope.json: reg_class=["1"]；要加回 2.2 改成 ["1","2.2"]
+  assert.equal(inScope({ ...base, regClass: '2.4' }), false, '2.4 新适应症不进');
+  assert.equal(inScope({ ...base, regClass: '2.2类' }), false, '2.2 新剂型不进（可配置加回）');
 });
 
 test('inScope：中药 / 3类 / 补充申请 / 进口 / 占位公司名 / 5.x 全出局', () => {
@@ -24,8 +27,8 @@ test('inScope：中药 / 3类 / 补充申请 / 进口 / 占位公司名 / 5.x �
   assert.equal(inScope({ ...base, applyType: '进口', company: 'X Pharma', regNo: 'JXHL2600001' }), false, 'J 开头进口受理号 = 境外主体');
   assert.equal(inScope({ ...base, company: '不适用' }), false, '占位公司名不进');
   assert.equal(inScope({ ...base, regClass: '5.2类' }), false, '5.x 已上市进口不进');
-  // 对照：进口类型 + 国产受理号仍在（筛的是受理号，不是申请类型）
-  assert.equal(inScope({ ...base, applyType: '进口', regNo: 'CXHL2600001' }), true);
+  // 口径：apply_type=["新药"]，进口申请整类不进
+  assert.equal(inScope({ ...base, applyType: '进口', regNo: 'CXHL2600001' }), false, '进口申请类型不进');
 });
 
 test('companyKey 保守：法人后缀不同视为同一主体，跨公司不合并', () => {
