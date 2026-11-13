@@ -175,7 +175,7 @@ function pullFeedback(records) {
 }
 
 // ── 不变量自检：宁可空，不可把矛盾组合写进销售看的表 ──
-const PHASE_OPTS = new Set(['I期', 'II期', 'III期/NDA', '无期次']);
+const PHASE_OPTS = new Set((SCHEMA.find(f => f.field_title === '期次')?.property_single_select?.options || []).map(o => o.text));
 
 function checkRows(rows) {
   const bad = [];

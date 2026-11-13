@@ -28,7 +28,7 @@ function loadScope() {
 }
 const IN_SCOPE_TYPE = '化药';
 const APPLY = new Set(['新药', '进口']);
-const NEW_CLASS = /^(1|2)(\.[0-9])?$/;
+const TWO_X = /^2(\.[0-9])?$/;   // 2.x 通配（2.1 新复方 / 2.2 新剂型 / 2.3 新途径 / 2.4 新适应症）
 const PLACEHOLDER = /^(无|不适用|N\/A|-|\/|—)$/i;
 
 function inScope(r) {
@@ -38,11 +38,10 @@ function inScope(r) {
   // 进口受理号（J 开头）= 境外主体持证资产，不是我们要跟的中国自研/自产机会
   if (cfg.exclude_import && /^J/.test(String(r.regNo || ''))) return false;
   if (PLACEHOLDER.test(String(r.company || '').trim())) return false;
-  // 注册分类：配置里的 "1" / "2.x"（缺省 1+2.x）
+  // 注册分类：配置里的具体值（"1"/"2.2"…）或通配 "2.x"
   const cls = String(r.regClass || '').replace(/类$/, '');
   const allow = new Set((cfg.reg_class || ['1', '2.x']).map(String));
-  if (allow.has('2.x') ? NEW_CLASS.test(cls) : allow.has(cls)) return true;
-  return allow.has(cls);
+  return (allow.has('2.x') && TWO_X.test(cls)) || allow.has(cls);
 }
 
 function loadAliases() {
@@ -152,6 +151,13 @@ if (require.main === module) {
   let store;
   try { store = JSON.parse(fs.readFileSync(STORE, 'utf8')); } catch (e) { console.error(`❌ 读不到 ${path.relative(WS, STORE)}: ${e.message}`); process.exit(1); }
   const before = Object.keys(store.rows || {}).length;
+  // --restore：把曾经越界剔除的行放回账本（改口径后捞回，不必重扫 CDE）
+  if (process.argv.includes('--restore')) {
+    const back = Object.values(store.dropped || {});
+    for (const row of back) store.rows[`${row.company}|${row.drugName}`] = row;
+    store.dropped = {};
+    console.log(`捞回归档 ${back.length} 行`);
+  }
   const r = applyToStore(store);
   console.log(`归并前 ${before} 行 → 口径内 ${r.before} 行 | 越界剔除 ${r.dropped} | 重复归并 ${r.merged}`);
   if (r.mergedPairs.length) {

@@ -31,11 +31,16 @@ const syncArgs = [has('--dry-run') ? '--dry-run' : null, val('--tiers') ? `--tie
 const STEP_TIMEOUT_MS = Number(process.env.PIPE_STEP_TIMEOUT_MIN || 30) * 60000;
 
 const steps = [];
-if (!has('--skip-collect')) steps.push({ name: 'CDE 采集', script: 'sources-cde.js', args: collectArgs, required: false });
+if (!has('--skip-collect')) {
+  steps.push({ name: 'CDE 采集', script: 'sources-cde.js', args: collectArgs, required: false });
+  // 归并/括号剥离/口径裁剪必须跟在采集后面，否则跨日期的公司名写法差异会落成两行（表里重复商机）
+  steps.push({ name: '口径归并', script: 'scope.js', args: ['--apply'], required: false });
+}
 if (!has('--skip-enrich')) {
   steps.push({ name: '期次富化', script: 'enrich-phase.js', args: enrichArgs, required: false });
   // 日常只处理「新增且没查过」的行（cdt_checked_at 去重），limit 只是失控保护，不是吞吐限制
-  steps.push({ name: '期次(CDT)', script: 'enrich-phase-cdt.js', args: [...enrichArgs, '--limit', '200', '--max-details', '3'], required: false });
+  // 不接 --recheck：那是重查全库的人工命令，直接跑 enrich-phase-cdt.js 更明确
+  steps.push({ name: '期次(CDT)', script: 'enrich-phase-cdt.js', args: ['--limit', '200', '--max-details', '3'], required: false });
   steps.push({ name: '联系渠道', script: 'enrich-contact.js', args: enrichArgs, required: false });
 }
 if (!has('--no-sync')) steps.push({ name: '同步表', script: 'sync.js', args: syncArgs, required: true });

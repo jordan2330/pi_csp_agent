@@ -143,7 +143,7 @@ async function nextPage(page) {
       phase: old.phase || '', phase_rank: old.phase_rank || 0, phase_src: old.phase_src || '',
       nct: old.nct || '', d7: old.d7 || null,
       reg_nos: old.reg_nos || [], company_raw: old.company_raw || [],
-      cdt_regno: old.cdt_regno || '', cdt_applicant: old.cdt_applicant || '', cdt_checked_at: old.cdt_checked_at || ''
+      cdt_checked_at: old.cdt_checked_at || ''
     };
   }
   store.updated_at = TODAY;

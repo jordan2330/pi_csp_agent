@@ -42,10 +42,10 @@ const coreName = (drugName) => {
 // CDT 期次文本 → rank（与 enrich-phase.js 同口径：III=3 / II=2 / I=1；BE/其他=0）
 const rankOf = (phaseText) => {
   const p = String(phaseText || '');
-  if (/^(?:IV|Ⅳ|4)/.test(p)) return 0;   // IV期=上市后研究，与 CT.gov 的 PHASE4 同口径记 0
-  if (/(?:III|Ⅲ|III期)/.test(p) || /^3/.test(p)) return 3;
-  if (/(?:II|Ⅱ)/.test(p) || /^2/.test(p)) return 2;
-  if (/(?:I|Ⅰ)/.test(p) || /^1/.test(p)) return 1;
+  if (/^(?:IV|4)/i.test(p)) return 0;   // IV期=上市后研究，与 CT.gov 的 PHASE4 同口径记 0
+  if (/III|3/.test(p)) return 3;
+  if (/II|2/.test(p)) return 2;
+  if (/I|1/.test(p)) return 1;
   return 0;   // 生物等效性 / 其他 / 空
 };
 const phaseLabel = (r) => (r === 3 ? 'III期' : r === 2 ? 'II期' : r === 1 ? 'I期' : '');
@@ -119,18 +119,14 @@ const overlap = (a, b) => {
       }
       log(`  ${best ? '✓' : '·'} ${r.drugName.slice(0, 16).padEnd(17)} ${r.company.slice(0, 18).padEnd(20)} → ${why}`);
       if (!DRY) {
-        if (best === 0 && row.phase && row.phase_src) {           // 重查无命中 → 保留原值，别用空覆盖
-          row.cdt_checked_at = new Date().toISOString().slice(0, 10);
-          dist[best] = (dist[best] || 0) + 1;
-          continue;
-        }
         row.cdt_checked_at = new Date().toISOString().slice(0, 10);
-        row.phase = best ? phaseLabel(best) : '';
-        row.phase_rank = best;
-        row.phase_src = src;
-        row.nct = '';
-        row.cdt_regno = chosen.length ? (chosen[0].regNo || '') : '';
-        row.cdt_applicant = chosen.length ? (chosen[0].applicantName || '') : '';
+        if (best === 0 && row.phase && row.phase_src) dist[best] = (dist[best] || 0) + 1;   // 重查无命中 → 保留原值，别用空覆盖
+        else {
+          row.phase = best ? phaseLabel(best) : '';
+          row.phase_rank = best;
+          row.phase_src = src;
+          row.nct = '';
+        }
       }
       dist[best] = (dist[best] || 0) + 1;
       if (done % 10 === 0) { log(`  …${done}/${targets.length}  命中 ${hit}  错误 ${errs}`); if (!DRY) save(store); }
