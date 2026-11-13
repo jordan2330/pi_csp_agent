@@ -26,6 +26,29 @@ const TIERS = (() => {
 })();
 const DRY = process.argv.includes('--dry-run');
 const DO_INIT = process.argv.includes('--init');
+const DO_DEDUPE = process.argv.includes('--dedupe');
+
+// 同资产异写：历史遗留的「规范化键」与「原始键」并存（HRS-6093 曾出现两行）。
+// 以 原始公司名|原始药名 为准合并，保证商机键唯一（否则表里会长出重复行）。
+function dedupe(rows) {
+  const out = {};
+  for (const r of Object.values(rows)) {
+    const k = `${r.company}|${r.drugName}`;
+    const o = out[k];
+    if (!o) { out[k] = { ...r }; continue; }
+    const late = (o.last_seen || '') >= (r.last_seen || '') ? o : r;
+    const early = late === o ? r : o;
+    out[k] = {
+      ...early, ...late,
+      first_seen: [o.first_seen, r.first_seen].filter(Boolean).sort()[0],
+      reg_nos: [...new Set([...(o.reg_nos || []), ...(r.reg_nos || []), o.regNo, r.regNo].filter(Boolean))],
+      phase: late.phase || early.phase || '', phase_rank: late.phase_rank || early.phase_rank || 0,
+      phase_src: late.phase_src || early.phase_src || '', nct: late.nct || early.nct || '',
+      d7: late.d7 || early.d7 || null
+    };
+  }
+  return out;
+}
 const log = (...a) => console.log(...a);
 
 (async () => {
@@ -33,7 +56,13 @@ const log = (...a) => console.log(...a);
   try { store = JSON.parse(fs.readFileSync(FILE, 'utf8')); } catch (e) {
     console.error(`❌ 读不到 ${path.relative(WS, FILE)}（先跑 sources-cde.js）: ${e.message}`); process.exit(1);
   }
-  const all = Object.values(store.rows || {});
+  const rowsById = dedupe(store.rows || {});
+  const mergedN = Object.keys(store.rows || {}).length - Object.keys(rowsById).length;
+  if (mergedN > 0) {
+    log(`账本同资产异写合并 ${mergedN} 条${DO_DEDUPE ? '（--dedupe：已落盘）' : '（仅内存，--dedupe 可落盘修复）'}`);
+    if (DO_DEDUPE) { store.rows = rowsById; fs.writeFileSync(FILE, JSON.stringify(store, null, 1)); }
+  }
+  const all = Object.values(rowsById);
   const scored = all.map(r => {
     const s = scoring.score({
       drugName: r.drugName, company: r.company, regClass: r.regClass, phase: r.phase || '',
