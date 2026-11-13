@@ -102,7 +102,12 @@ function applyToStore(store) {
     prev.reg_nos = [...new Set([...(prev.reg_nos || [prev.regNo].filter(Boolean)), r.regNo].filter(Boolean))];
   }
   store.rows = kept;
-  return { before: Object.keys(store.rows).length, dropped: dropped.length, merged: merged.length, mergedPairs: merged.slice(0, 10), stripped };
+  // 越界行归档：改口径（如把进口加回来）时不必重扫 CDE
+  if (dropped.length) {
+    store.dropped = store.dropped || {};
+    for (const r of dropped) store.dropped[`${r.company}|${r.drugName}`] = { ...r, dropped_at: new Date().toISOString().slice(0, 10) };
+  }
+  return { before: Object.keys(kept).length, dropped: dropped.length, merged: merged.length, mergedPairs: merged.slice(0, 10), stripped };
 }
 
 module.exports = { inScope, normalize, stripRemarkParen, companyKey, loadAliases, applyToStore };
@@ -151,7 +156,12 @@ if (require.main === module) {
   }
   if (r.stripped.length) console.log('括号备注剥离:', r.stripped.join(' ; '));
   if (!apply) { console.log('(dry-run，加 --apply 落盘)'); process.exit(0); }
-  store.scope = { drug_type: IN_SCOPE_TYPE, apply_type: [...APPLY], reg_class: '1|2.x', applied_at: new Date().toISOString() };
+  const eff = loadScope();
+  store.scope = {
+    drug_type: IN_SCOPE_TYPE, reg_class: '1|2.x',
+    apply_type: eff.apply_type || [...APPLY], exclude_import: !!eff.exclude_import,
+    applied_at: new Date().toISOString()
+  };
   fs.writeFileSync(STORE, JSON.stringify(store, null, 1));
   console.log(`✅ 已写入 ${path.relative(WS, STORE)}`);
 }

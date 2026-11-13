@@ -127,7 +127,7 @@ node scenarios/pipeline/sync.js            # 同步 A/B 档（默认）
 |---|---|---|---|
 | 1 采集 | `sources-cde.js` | CDE 受理列表按日期游标翻页（增量）→ 合并进 `output/history/pipeline-cde.json` + 推进游标 | 告警后继续（自检都在落盘前，账本不会写坏） |
 | 2a 期次 | `enrich-phase.js` | CT.gov 按代号/INN 查期次（干预名精确校验），已有期次的跳过 | 告警后继续 |
-| 2c 期次 | `enrich-phase-cdt.js` | CDT 按代号/中文药名查（药名 + 申请人双校验；BE 不算期次），补 CT.gov 没收录的中国试验 | 告警后继续（浏览器/CDT 不可用时跳过） |
+| 2c 期次 | `enrich-phase-cdt.js` | CDT 按代号/中文药名查（药名 + 申请人双校验；BE/IV 期不算期次），补 CT.gov 没收录的中国试验。每轮限 40 个，查过打 `cdt_checked_at` 不再重查 | 告警后继续（浏览器/CDT 不可用时跳过） |
 | 2b 渠道 | `enrich-contact.js` | CT.gov 中央联系邮箱 → 只存渠道类型 + 企业域名 | 告警后继续 |
 | 3 交付 | `sync.js` | 打分 → 窗口过滤 → upsert 第二张表 + 拉回反馈 | 退出 1（交付没落地，必须有人知道） |
 
@@ -146,6 +146,8 @@ node scenarios/pipeline/run.js --no-sync       # 只更新本地账本
 单步调试仍可直接跑各脚本（参数见各自头部注释）；`sync.js --init` 只用于首次建表，`sync.js --dedupe` 是「同资产异写」的落盘修复（2026-11-11 已根除根因：`scope.applyToStore` 与 `sources-cde.js` 现在都写原始键 `公司|药名`，`sync.js` 每轮还会在内存兜底合并，正常情况下 mergedN=0）。
 
 **表内口径**：档位 A/B ∪ 有反馈的行；`最近受理日 > 18 个月且无反馈` 自动移出（`PIPE_WINDOW_MONTHS` 可调）；有反馈的行永不删。
+
+**口径裁剪留档**：`scope.js --apply` 剔除的越界行进 `store.dropped`（同文件），改口径（如把进口加回来）时可从那里捞回，不必重扫 CDE。
 
 ## 下一步（按顺序）
 

@@ -135,7 +135,16 @@ async function nextPage(page) {
   store.rows = store.rows || {};
   for (const r of rows) {
     const k = `${r.company}|${r.drugName}`;
-    store.rows[k] = { ...r, first_seen: store.rows[k]?.first_seen || r.firstSeen, last_seen: r.lastSeen };
+    // 只覆盖 CDE 来源列；富化字段（期次/联系渠道/受理号集合/公司原值）必须保留，否则每轮重采都会清空
+    const old = store.rows[k] || {};
+    store.rows[k] = {
+      ...old, ...r,
+      first_seen: old.first_seen || r.firstSeen, last_seen: r.lastSeen,
+      phase: old.phase || '', phase_rank: old.phase_rank || 0, phase_src: old.phase_src || '',
+      nct: old.nct || '', d7: old.d7 || null,
+      reg_nos: old.reg_nos || [], company_raw: old.company_raw || [],
+      cdt_regno: old.cdt_regno || '', cdt_applicant: old.cdt_applicant || '', cdt_checked_at: old.cdt_checked_at || ''
+    };
   }
   store.updated_at = TODAY;
   fs.writeFileSync(OUT_FILE, JSON.stringify(store, null, 1));

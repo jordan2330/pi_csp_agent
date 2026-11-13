@@ -34,6 +34,7 @@ const steps = [];
 if (!has('--skip-collect')) steps.push({ name: 'CDE 采集', script: 'sources-cde.js', args: collectArgs, required: false });
 if (!has('--skip-enrich')) {
   steps.push({ name: '期次富化', script: 'enrich-phase.js', args: enrichArgs, required: false });
+  steps.push({ name: '期次(CDT)', script: 'enrich-phase-cdt.js', args: [...enrichArgs, '--limit', '40', '--max-details', '3'], required: false });
   steps.push({ name: '联系渠道', script: 'enrich-contact.js', args: enrichArgs, required: false });
 }
 if (!has('--no-sync')) steps.push({ name: '同步表', script: 'sync.js', args: syncArgs, required: true });

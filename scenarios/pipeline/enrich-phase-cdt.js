@@ -42,7 +42,7 @@ const coreName = (drugName) => {
 // CDT 期次文本 → rank（与 enrich-phase.js 同口径：III=3 / II=2 / I=1；BE/其他=0）
 const rankOf = (phaseText) => {
   const p = String(phaseText || '');
-  if (/^(?:IV|Ⅳ|4)/.test(p)) return 3;
+  if (/^(?:IV|Ⅳ|4)/.test(p)) return 0;   // IV期=上市后研究，与 CT.gov 的 PHASE4 同口径记 0
   if (/(?:III|Ⅲ|III期)/.test(p) || /^3/.test(p)) return 3;
   if (/(?:II|Ⅱ)/.test(p) || /^2/.test(p)) return 2;
   if (/(?:I|Ⅰ)/.test(p) || /^1/.test(p)) return 1;
@@ -50,8 +50,9 @@ const rankOf = (phaseText) => {
 };
 const phaseLabel = (r) => (r === 3 ? 'III期' : r === 2 ? 'II期' : r === 1 ? 'I期' : '');
 
-const strip = (s) => String(s || '').replace(/[（(].{6,}[）)]/g, '').replace(/[^\u4e00-\u9fffA-Za-z0-9]/g, '')
-  .replace(/(股份有限公司|有限责任公司|有限公司|股份公司|公司|集团|控股)/g, '');
+// 公司名归一一律复用 scope.js（避免第三套语义分叉：曾因括号规则不一致误并）
+const { normalize: scopeNormalize, stripRemarkParen } = require('./scope');
+const strip = (s) => scopeNormalize(stripRemarkParen(s));
 const overlap = (a, b) => {
   const x = strip(a), y = strip(b);
   if (!x || !y) return false;
@@ -68,6 +69,7 @@ const overlap = (a, b) => {
   const pts = (r) => scoring.score({ drugName: r.drugName, company: r.company, regClass: r.regClass, phase: r.phase || '', regNo: r.regNo, d7: r.d7 }, { mode: 'full' }).points;
   const targets = Object.entries(store.rows || {})
     .filter(([, r]) => RECHECK || !(r.phase && r.phase_src))
+    .filter(([, r]) => RECHECK || !r.cdt_checked_at)          // 已查过不再重复（CDT 有瑞数风控，每日跑要控量）
     .map(([k, r]) => [k, r, pts(r)])
     .sort((a, b) => b[2] - a[2])                                  // 同分组内高分优先
     .slice(0, LIMIT);
@@ -117,6 +119,12 @@ const overlap = (a, b) => {
       }
       log(`  ${best ? '✓' : '·'} ${r.drugName.slice(0, 16).padEnd(17)} ${r.company.slice(0, 18).padEnd(20)} → ${why}`);
       if (!DRY) {
+        if (best === 0 && row.phase && row.phase_src) {           // 重查无命中 → 保留原值，别用空覆盖
+          row.cdt_checked_at = new Date().toISOString().slice(0, 10);
+          dist[best] = (dist[best] || 0) + 1;
+          continue;
+        }
+        row.cdt_checked_at = new Date().toISOString().slice(0, 10);
         row.phase = best ? phaseLabel(best) : '';
         row.phase_rank = best;
         row.phase_src = src;

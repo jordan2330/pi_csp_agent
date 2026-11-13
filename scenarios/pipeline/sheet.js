@@ -119,7 +119,7 @@ function rowValues(r) {
     '公司': W.V.text(r.company),
     '资产/药品名': W.V.text(r.drugName),
     '剂型': W.V.text(r.form || ''),
-    '期次': S('期次', r.phase || '无期次'),
+    '期次': S('期次', String(r.phase || '').replace(/\/IND$/, '') || '无期次'),   // 选项里没有 I期/IND，带后缀会被企微静默丢弃
     '注册分类': W.V.text(r.regClass || ''),
     'D1剂型分': NUMBER(r.dims?.D1 ?? 0),
     'D2理化分': NUMBER(r.dims?.D2 ?? 0),
@@ -175,6 +175,8 @@ function pullFeedback(records) {
 }
 
 // ── 不变量自检：宁可空，不可把矛盾组合写进销售看的表 ──
+const PHASE_OPTS = new Set(['I期', 'II期', 'III期/NDA', '无期次']);
+
 function checkRows(rows) {
   const bad = [];
   for (const r of rows) {
@@ -185,6 +187,8 @@ function checkRows(rows) {
     if (r.points !== expect) bad.push([r.key, `总分=${r.points} 与各维之和=${expect} 不符`]);
     if (r.phase && (r.dims?.D3 ?? 0) === 0) bad.push([r.key, `有期次(${r.phase})但 D3=0`]);
     if (!r.phase && (r.dims?.D3 ?? 0) > 0) bad.push([r.key, '无期次但 D3>0']);
+    const ph = String(r.phase || '').replace(/\/IND$/, '');
+    if (ph && !PHASE_OPTS.has(ph)) bad.push([r.key, `期次取值不在单选选项内: ${r.phase}`]);
   }
   return bad;
 }
