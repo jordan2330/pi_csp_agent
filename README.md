@@ -450,7 +450,6 @@ pi-csp-agent/
 │   ├── launch-chrome.sh               # 启动 Windows 侧真实 Chrome（CDP 9223）
 │   ├── reset-and-search.sh            # 从零全量重置脚本
 │   ├── wecom-sync.js                  # 智能表格运维 CLI（init/status/feedback/checkip）
-│   ├── wecom-poc.js                   # 企微 PoC 验证工具
 │   └── lib/                           # 通用层（跨场景复用）
 │       ├── sources.js                 # CT.gov REST + CDT 浏览器采集
 │       ├── cde-classify.js            # CDE 受理品种信息 → 注册分类证据（官方一手，免费）
