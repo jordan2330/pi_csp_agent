@@ -44,7 +44,8 @@
 ```bash
 node scenarios/pipeline/sources-cde.js                  # 增量：按承办日期游标翻页（日常 1 页）
 node scenarios/pipeline/sources-cde.js --from 2025-11-11 --start-page 200   # 续回填历史
-node scenarios/pipeline/enrich-phase.js                 # 按药品代号挂期次（CT.gov）
+node scenarios/pipeline/enrich-phase.js                 # 按药品代号/INN 挂期次（CT.gov）
+node scenarios/pipeline/enrich-phase-cdt.js             # 按代号/中文药名挂期次（CDT，补 CT.gov 没收录的中国试验）
 ```
 
 | 环节 | 实测结果 |
@@ -52,7 +53,7 @@ node scenarios/pipeline/enrich-phase.js                 # 按药品代号挂期�
 | CDE 受理全量 | 366 页 / 18289 行 → 1834 条公司×资产 → **口径内 1125 行**（化药 + 1/2.x + 新药\|进口） |
 | 期次挂载 ①代号 756 个 | 443 命中（59%） |
 | 期次挂载 ②英文 INN 280 个 | 38 命中（14%）—— 多数 INN 是已上市药，CT.gov 上只有 PHASE4（按 D3 规则记 0 分，符合预期） |
-| 期次覆盖率合计 | **543 / 1125 = 48%**；剩 582 行无期次（其中纯中文名 289 行，需 CDT） |
+| 期次覆盖率合计 | **402 / 817 = 49%**（口径收紧+排除进口后为分母）；CDT 补了 57 行（`CDT(代号|药名+申请人)`） |
 | 档位（lite） | A **38** / B 333 / C 341 / D 413 |
 | D3 分布 | 0 分 712 / I 期 135 / II 期 119 / III 期 159 |
 
@@ -88,7 +89,7 @@ node scenarios/pipeline/enrich-phase.js                 # 按药品代号挂期�
 |---|---|---|---|
 | D1 剂型 | ×2 | 药品名后缀 | ✅ |
 | D2 理化风险 | ×2 | 亚硝胺清单/口服肽/浸膏/缓控释/复方 + 引湿类别 | ✅ |
-| D3 期次 | ×1 | CT.gov（代号/INN + 干预名校验） | ✅ 48% 覆盖 |
+| D3 期次 | ×1 | CT.gov（代号/INN + 干预名校验）+ CDT（代号/中文药名 + 申请人校验） | ✅ 49% 覆盖 |
 | D4 企业规模 | **×2** | `config/pipeline-bigpharma.json` 大客户集团 + 别名（销售指定 12 家） | ✅ 命中 3 / 中小 1 / 高校医院 0 |
 | D5 事件强度 | ×1 | 期次 + 受理号第 4 位（`S`=上市申请 / `L`=临床试验申请） | ✅ |
 | D6 决策权 | ×1 | 申请人是否中国主体（中文名+法人后缀） | ✅ 代理指标 |
@@ -126,6 +127,7 @@ node scenarios/pipeline/sync.js            # 同步 A/B 档（默认）
 |---|---|---|---|
 | 1 采集 | `sources-cde.js` | CDE 受理列表按日期游标翻页（增量）→ 合并进 `output/history/pipeline-cde.json` + 推进游标 | 告警后继续（自检都在落盘前，账本不会写坏） |
 | 2a 期次 | `enrich-phase.js` | CT.gov 按代号/INN 查期次（干预名精确校验），已有期次的跳过 | 告警后继续 |
+| 2c 期次 | `enrich-phase-cdt.js` | CDT 按代号/中文药名查（药名 + 申请人双校验；BE 不算期次），补 CT.gov 没收录的中国试验 | 告警后继续（浏览器/CDT 不可用时跳过） |
 | 2b 渠道 | `enrich-contact.js` | CT.gov 中央联系邮箱 → 只存渠道类型 + 企业域名 | 告警后继续 |
 | 3 交付 | `sync.js` | 打分 → 窗口过滤 → upsert 第二张表 + 拉回反馈 | 退出 1（交付没落地，必须有人知道） |
 
@@ -149,5 +151,5 @@ node scenarios/pipeline/run.js --no-sync       # 只更新本地账本
 
 1. **上生产表**（生产机操作）：`scp` 开发机的 `output/history/pipeline-cde.json` → `node scenarios/pipeline/sync.js --init`。数据不随 git 走，重采要 1–2 小时。
 2. **数据质量**：`config/company-aliases.json` 仍为空（多受理号只显示首号、公司名括号备注两项已于 `scope.js`/`sheet.js` 修复）；同资产异写已根除——`scope.applyToStore` 落盘键与 `sources-cde.js`/`sync.js` 统一为原始 `公司|药名`，判重仍按归一键。
-3. **M3.5**：289 行纯中文名资产补期次（CDT 中文药名检索，约 3 小时）。
+3. ~~M3.5 中文名资产补期次~~ ✅ 已做（`enrich-phase-cdt.js`，补了 53 行；只剩 328 行 C/D 档资产，即使补上期次也进不了 B，**不必再跑**）。
 4. **M6 事件流**（搁置中）：等销售用满两周有反馈后再评估；届时数据源为 cninfo 公告 + Google News RSS（Fierce/Endpoints 实测 403，不用）。
