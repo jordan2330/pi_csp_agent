@@ -41,8 +41,13 @@ const log = (...a) => console.log(...a);
     }, { mode: 'full' });
     return { ...r, ...s, key: `PIPE|${r.company}|${r.drugName}` };
   });
-  const out = scored.filter(r => !r.excluded && TIERS.includes(r.tier));
-  log(`口径内 ${all.length} 行 → 同步档位 ${TIERS.join('/')} 共 ${out.length} 行`);
+  // 窗口：最近受理日超 N 个月不进表（表内如有反馈则由 sheet.sync 保留，销售跟过的线索不消失）
+  const WINDOW_MONTHS = Number(process.env.PIPE_WINDOW_MONTHS || 18);
+  const cutoff = new Date(Date.now() - WINDOW_MONTHS * 30.4 * 864e5).toISOString().slice(0, 10);
+  const lastAt = (r) => String(r.last_seen || r.date || '');
+  const within = scored.filter(r => !lastAt(r) || lastAt(r) >= cutoff);
+  const out = within.filter(r => !r.excluded && TIERS.includes(r.tier));
+  log(`口径内 ${all.length} 行 → 窗口内 ${within.length} 行（>${WINDOW_MONTHS} 个月 ${scored.length - within.length} 行）→ 同步档位 ${TIERS.join('/')} 共 ${out.length} 行`);
 
   if (DO_INIT) {
     const cfg = await sheet.initTable();

@@ -117,11 +117,34 @@ node scenarios/pipeline/sync.js            # 同步 A/B 档（默认）
 1. **数值单元格必须写裸数字**：`{总分: 9}`。写 `[{type:'number',number:9}]` 或 `[{number:9}]` 都会静默丢弃（读回 undefined）。
 2. **URL 字段必须带 `property_url`**：`{type:'url', property_url:{type:'LINK_TYPE_ICON_TEXT'}}`，缺了报 `2022019 CheckAddFieldReq failed`；数值字段缺 `property_number` 报 `2022017`。
 
+## 日常运行（Phase 流程）
+
+**唯一入口** `scenarios/pipeline/run.js`：一条命令跑完 采集 → 期次 → 渠道 → 同步。
+
+| Phase | 脚本 | 做什么 | 失败时 |
+|---|---|---|---|
+| 1 采集 | `sources-cde.js` | CDE 受理列表按日期游标翻页（增量）→ 合并进 `output/history/pipeline-cde.json` + 推进游标 | 告警后继续（自检都在落盘前，账本不会写坏） |
+| 2a 期次 | `enrich-phase.js` | CT.gov 按代号/INN 查期次（干预名精确校验），已有期次的跳过 | 告警后继续 |
+| 2b 渠道 | `enrich-contact.js` | CT.gov 中央联系邮箱 → 只存渠道类型 + 企业域名 | 告警后继续 |
+| 3 交付 | `sync.js` | 打分 → 窗口过滤 → upsert 第二张表 + 拉回反馈 | 退出 1（交付没落地，必须有人知道） |
+
+```bash
+node scenarios/pipeline/run.js                 # 日常
+node scenarios/pipeline/run.js --dry-run       # 只算不写表
+node scenarios/pipeline/run.js --skip-collect  # CDE 页面异常时：只富化 + 同步
+node scenarios/pipeline/run.js --tiers A       # 只同步 A 档
+node scenarios/pipeline/run.js --no-sync       # 只更新本地账本
+```
+
+定时（与主表并列，择一）：`17 7 * * * cd <repo> && node scenarios/pipeline/run.js >> output/pipeline-cron.log 2>&1`
+
+单步调试仍可直接跑各脚本（参数见各自头部注释）；`sync.js --init` 只用于首次建表。
+
+**表内口径**：档位 A/B ∪ 有反馈的行；`最近受理日 > 18 个月且无反馈` 自动移出（`PIPE_WINDOW_MONTHS` 可调）；有反馈的行永不删。
+
 ## 下一步（按顺序）
 
-1. **接通 D3**：CT.gov `query.lead=<企业>` 反查期次 + CDT 按药品名检索期次，把期次覆盖率从 10% 拉起来，再重跑回测校准阈值。
-2. CDE 受理「新药（1 类 / 2.x）」全量增量（承办日期游标）→ 公司×资产种子。
-3. 建第二张表（≤20 列，含反馈 4 列）+ 独立同步器 + 独立 `config/wecom-pipeline.json`。
-4. 二期：cninfo 事件流（叠加 G1、License-out 降权不减分）、公司名归一表 `config/company-aliases.json`。
-
-**本期不做**：港股数据、融资/IPO、LLM 摘要、CSP 推荐矩阵（剂型未知时给了就是假数据）。
+1. **上生产表**（生产机操作）：`scp` 开发机的 `output/history/pipeline-cde.json` → `node scenarios/pipeline/sync.js --init`。数据不随 git 走，重采要 1–2 小时。
+2. **数据质量**：多受理号只显示首号（4 条）、公司名残留括号备注（1 条）、`config/company-aliases.json` 仍为空。
+3. **M3.5**：289 行纯中文名资产补期次（CDT 中文药名检索，约 3 小时）。
+4. **M6 事件流**（搁置中）：等销售用满两周有反馈后再评估；届时数据源为 cninfo 公告 + Google News RSS（Fierce/Endpoints 实测 403，不用）。
