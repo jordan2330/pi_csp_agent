@@ -1,8 +1,10 @@
 {
-  "_comment": "队列口径（scope.js 是唯一消费者）。apply_type=允许的申请类型；exclude_import=true → 只保留国产受理号（C 开头），排除进口（J 开头）的境外主体资产。药品类型(化药)与注册分类(1/2.x)在 scope.js 里是常量（改它们要动代码）。",
+  "_comment": "队列口径（scope.js 是唯一消费者）。reg_class=允许的注册分类（\"1\"=创新药；\"2.x\"=改良型新药，含 2.1 新复方/2.2 新剂型/2.3 新途径/2.4 新适应症）。apply_type=允许的申请类型。exclude_import=true → 只留国产受理号（C 开头）。药品类型(化药)在 scope.js 里是常量。",
+  "reg_class": [
+    "1"
+  ],
   "apply_type": [
-    "新药",
-    "进口"
+    "新药"
   ],
   "exclude_import": true
 }

@@ -38,8 +38,11 @@ function inScope(r) {
   // 进口受理号（J 开头）= 境外主体持证资产，不是我们要跟的中国自研/自产机会
   if (cfg.exclude_import && /^J/.test(String(r.regNo || ''))) return false;
   if (PLACEHOLDER.test(String(r.company || '').trim())) return false;
+  // 注册分类：配置里的 "1" / "2.x"（缺省 1+2.x）
   const cls = String(r.regClass || '').replace(/类$/, '');
-  return NEW_CLASS.test(cls);
+  const allow = new Set((cfg.reg_class || ['1', '2.x']).map(String));
+  if (allow.has('2.x') ? NEW_CLASS.test(cls) : allow.has(cls)) return true;
+  return allow.has(cls);
 }
 
 function loadAliases() {
@@ -116,9 +119,9 @@ if (require.main === module) {
   const assert = require('assert');
   // 口径自检
   assert.equal(inScope({ drugType: '化药', applyType: '新药', regClass: '1类', company: 'X药业' }), true);
-  assert.equal(inScope({ drugType: '化药', applyType: '新药', regClass: '2.4', company: 'X药业' }), true);
+  assert.equal(inScope({ drugType: '化药', applyType: '新药', regClass: '2.4', company: 'X药业' }), false);   // 当前口径只要创新药(1 类)，2.x 改良型不进
   assert.equal(inScope({ drugType: '化药', applyType: '进口', regClass: '1', company: 'X Pharma', regNo: 'JXHL2600001' }), false);   // 进口已按 config 排除
-  assert.equal(inScope({ drugType: '化药', applyType: '进口', regClass: '1', company: 'X药业', regNo: 'CXHL2600001' }), true);
+  assert.equal(inScope({ drugType: '化药', applyType: '进口', regClass: '1', company: 'X药业', regNo: 'CXHL2600001' }), false);  // 当前口径只要新药申请，进口整类不进
   assert.equal(inScope({ drugType: '中药', applyType: '新药', regClass: '1.1类', company: 'X药业' }), false);
   assert.equal(inScope({ drugType: '化药', applyType: '补充申请', regClass: '1类', company: 'X药业' }), false);
   assert.equal(inScope({ drugType: '化药', applyType: '新药', regClass: '3类', company: 'X药业' }), false);

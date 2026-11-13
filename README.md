@@ -257,7 +257,7 @@ node scripts/run-pipeline.js nitrosamine
 
 ## 管线场景（CSP管线商机）
 
-第二个交付场景：**CDE 受理（化药 + 注册分类 1/2.x，排除进口 `J` 前缀受理号）→ 公司×资产 → 评分卡 → 企微第二张表「CSP管线商机」**。与亚硝胺共用浏览器采集与企微 API，但种子轴、行粒度、表、账本全独立，**不走 `run-pipeline.js`**。
+第二个交付场景：**CDE 受理（化药 + 注册分类 1 类创新药 + 申请类型新药，排除进口 `J` 前缀受理号）→ 公司×资产 → 评分卡 → 企微第二张表「CSP管线商机」**。2.x 改良型新药不进（老药改剂型，像仿制）；要加回改 `config/pipeline-scope.json`。与亚硝胺共用浏览器采集与企微 API，但种子轴、行粒度、表、账本全独立，**不走 `run-pipeline.js`**。
 
 ```bash
 node scenarios/pipeline/run.js                 # 日常：CDE 增量采集 → 期次 → 联系渠道 → 同步表
