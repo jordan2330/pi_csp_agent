@@ -46,6 +46,18 @@ function loadAliases() {
   try { return JSON.parse(fs.readFileSync(ALIAS_FILE, 'utf8')); } catch { return { aliases: {}, blocklist: [] }; }
 }
 
+// 备注型括号剥离：CDE 公司字段里混着「生产/包装说明」括号
+//   （如「江苏豪森药业集团有限公司(预填充注射笔的组装和最终成品包装: 江苏恒瑞医药股份有限公司)」），
+//   它不属于主体名。只剥机械可判的：括号内出现冒号（说明型），或内容超过 16 字（成句说明）。
+//   短括号「（北京）/（中国）」与 `;` 分隔的多主体列表一律保留 —— 错并两家比多两行更糟（华辉安健误并事故）。
+// shortcut: 不处理嵌套括号（CDE 未出现），遇到再补。
+function stripRemarkParen(name) {
+  return String(name || '').replace(/[（(]([^（()）]*)[）)]/g, (m, inner) => {
+    if (/[;；]/.test(inner)) return m;
+    return /:|：/.test(inner) || inner.trim().length > 16 ? '' : m;
+  }).trim();
+}
+
 // 机械归一：去法人后缀/括号内容/空白标点，拉丁字母大写
 function normalize(name) {
   return String(name || '')
@@ -63,16 +75,26 @@ function companyKey(name) {
   return normalize(name);
 }
 
-// 就地裁剪 + 归并：同 (companyKey, 归一药品名) 合成一行，保留最早 first_seen / 最新 last_seen
+// 就地裁剪 + 归并：按 (companyKey, 归一药品名) 判重，但**落盘键用原始 `公司|药名`**
+//   与 sources-cde.js / sync.js 同口径（否则同一资产存成两行，表里长出重复商机键）。
+// 剥括号备注后的公司名写回 company，原值留在 company_raw。
 function applyToStore(store) {
-  const kept = {}, merged = [], dropped = [];
+  const kept = {}, index = new Map(), merged = [], dropped = [], stripped = [];
   for (const r of Object.values(store.rows || {})) {
     if (!inScope(r)) { dropped.push(r); continue; }
-    const key = `${companyKey(r.company)}|${normalize(r.drugName)}`;
+    const company = stripRemarkParen(r.company);
+    if (company !== r.company) stripped.push(r.company);
+    const nkey = `${companyKey(company)}|${normalize(r.drugName)}`;
+    const key = index.get(nkey);
+    if (!key) {
+      const k = `${company}|${r.drugName}`;
+      index.set(nkey, k);
+      kept[k] = { ...r, company, company_raw: [...new Set([...(r.company_raw || []), r.company])] };
+      continue;
+    }
     const prev = kept[key];
-    if (!prev) { kept[key] = { ...r, company_raw: [r.company] }; continue; }
-    merged.push([prev.company, r.company]);
-    prev.company_raw = [...new Set([...prev.company_raw, r.company])];
+    merged.push([prev.company, company]);
+    prev.company_raw = [...new Set([...prev.company_raw, ...(r.company_raw || []), r.company])];
     if (r.first_seen && (!prev.first_seen || r.first_seen < prev.first_seen)) prev.first_seen = r.first_seen;
     if (r.last_seen && (!prev.last_seen || r.last_seen > prev.last_seen)) prev.last_seen = r.last_seen;
     if ((r.phase_rank || 0) > (prev.phase_rank || 0)) { prev.phase = r.phase; prev.phase_rank = r.phase_rank; prev.nct = r.nct; prev.phase_src = r.phase_src; }
@@ -80,10 +102,10 @@ function applyToStore(store) {
     prev.reg_nos = [...new Set([...(prev.reg_nos || [prev.regNo].filter(Boolean)), r.regNo].filter(Boolean))];
   }
   store.rows = kept;
-  return { before: Object.keys(store.rows).length, dropped: dropped.length, merged: merged.length, mergedPairs: merged.slice(0, 10) };
+  return { before: Object.keys(store.rows).length, dropped: dropped.length, merged: merged.length, mergedPairs: merged.slice(0, 10), stripped };
 }
 
-module.exports = { inScope, normalize, companyKey, loadAliases, applyToStore };
+module.exports = { inScope, normalize, stripRemarkParen, companyKey, loadAliases, applyToStore };
 
 if (require.main === module) {
   const assert = require('assert');
@@ -99,6 +121,24 @@ if (require.main === module) {
   // 归一自检
   assert.equal(normalize('江苏恒瑞医药股份有限公司'), normalize('江苏恒瑞医药有限公司'));
   assert.notEqual(normalize('江苏恒瑞医药股份有限公司'), normalize('江苏豪森药业集团有限公司'));
+  // 括号备注剥离：只剥说明型（冒号 / >16 字），短括号与多主体列表保留
+  assert.equal(stripRemarkParen('江苏豪森药业集团有限公司(预填充注射笔的组装和最终成品包装: 江苏恒瑞医药股份有限公司)'), '江苏豪森药业集团有限公司');
+  assert.equal(stripRemarkParen('华辉安健（北京）生物科技有限公司'), '华辉安健（北京）生物科技有限公司');
+  assert.equal(stripRemarkParen('远大医药（中国）有限公司'), '远大医药（中国）有限公司');
+  assert.equal(stripRemarkParen('A药业（B公司;C公司）'), 'A药业（B公司;C公司）');                       // 多主体列表保留
+  assert.equal(stripRemarkParen('A药业（这一段括号内容明显超过十六个字符属于成句说明）'), 'A药业');
+  // 落盘键 = 原始 公司|药名（与 sources-cde / sync 一致），判重仍按归一键
+  {
+    const store = { rows: {
+      'X药业|同一资产片': { company: 'X药业', drugName: '同一资产片', drugType: '化药', applyType: '新药', regClass: '1', last_seen: '2026-01-01' },
+      'X药业(委托生产: Y公司)|同一资产片': { company: 'X药业(委托生产: Y公司)', drugName: '同一资产片', drugType: '化药', applyType: '新药', regClass: '1', last_seen: '2026-02-01' }
+    } };
+    const out = applyToStore(store);
+    assert.deepEqual(Object.keys(store.rows), ['X药业|同一资产片']);
+    assert.equal(store.rows['X药业|同一资产片'].last_seen, '2026-02-01');
+    assert.deepEqual(store.rows['X药业|同一资产片'].company_raw, ['X药业', 'X药业(委托生产: Y公司)']);
+    assert.equal(out.merged, 1);
+  }
 
   const apply = process.argv.includes('--apply');
   let store;
@@ -109,6 +149,7 @@ if (require.main === module) {
   if (r.mergedPairs.length) {
     console.log('归并样例:', r.mergedPairs.map(([a, b]) => `${a} + ${b}`).join(' ; '));
   }
+  if (r.stripped.length) console.log('括号备注剥离:', r.stripped.join(' ; '));
   if (!apply) { console.log('(dry-run，加 --apply 落盘)'); process.exit(0); }
   store.scope = { drug_type: IN_SCOPE_TYPE, apply_type: [...APPLY], reg_class: '1|2.x', applied_at: new Date().toISOString() };
   fs.writeFileSync(STORE, JSON.stringify(store, null, 1));

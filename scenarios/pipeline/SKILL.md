@@ -111,6 +111,7 @@ node scenarios/pipeline/sync.js            # 同步 A/B 档（默认）
 - 表选择：`WECOM_TABLE=pipeline` → `config/wecom-pipeline.json`（prod）/ `config/wecom-pipeline.dev.json`（dev），与主表配置互不干扰
 - 反馈账本独立：`output/history/feedback-pipeline.json`
 - 表内 = 档位 A/B ∪ 有反馈的行；缩表护栏、字段级合并（反馈 4 列销售独占）与主表同款
+- `登记号` 列展示该资产**全部**受理号（升序，最多 3 个，超出显示前 3 个 + `+N`）；它只是展示，商机键仍为 `PIPE|公司|药名`，多受理号不拆行（`sheet.js → regNosText`）
 
 **企微 API 两个必踩坑（实测）**
 
@@ -140,13 +141,13 @@ node scenarios/pipeline/run.js --no-sync       # 只更新本地账本
 
 单步墙钟上限 30 分钟（`PIPE_STEP_TIMEOUT_MIN` 可调）：卡住的步骤会被杀掉并记为失败，不会拖整晚。
 
-单步调试仍可直接跑各脚本（参数见各自头部注释）；`sync.js --init` 只用于首次建表，`sync.js --dedupe` 用于修复账本里「同资产异写」（同一资产因历史键格式不同存成两行，会在表里长出重复行）。
+单步调试仍可直接跑各脚本（参数见各自头部注释）；`sync.js --init` 只用于首次建表，`sync.js --dedupe` 是「同资产异写」的落盘修复（2026-11-11 已根除根因：`scope.applyToStore` 与 `sources-cde.js` 现在都写原始键 `公司|药名`，`sync.js` 每轮还会在内存兜底合并，正常情况下 mergedN=0）。
 
 **表内口径**：档位 A/B ∪ 有反馈的行；`最近受理日 > 18 个月且无反馈` 自动移出（`PIPE_WINDOW_MONTHS` 可调）；有反馈的行永不删。
 
 ## 下一步（按顺序）
 
 1. **上生产表**（生产机操作）：`scp` 开发机的 `output/history/pipeline-cde.json` → `node scenarios/pipeline/sync.js --init`。数据不随 git 走，重采要 1–2 小时。
-2. **数据质量**：多受理号只显示首号（4 条）、公司名残留括号备注（1 条）、`config/company-aliases.json` 仍为空。
+2. **数据质量**：`config/company-aliases.json` 仍为空（多受理号只显示首号、公司名括号备注两项已于 `scope.js`/`sheet.js` 修复）；同资产异写已根除——`scope.applyToStore` 落盘键与 `sources-cde.js`/`sync.js` 统一为原始 `公司|药名`，判重仍按归一键。
 3. **M3.5**：289 行纯中文名资产补期次（CDT 中文药名检索，约 3 小时）。
 4. **M6 事件流**（搁置中）：等销售用满两周有反馈后再评估；届时数据源为 cninfo 公告 + Google News RSS（Fierce/Endpoints 实测 403，不用）。

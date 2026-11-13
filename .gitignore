@@ -10,6 +10,7 @@ pi-home/
 .superpowers/
 docs/superpowers/
 test/
+!scenarios/pipeline/test/
 /20260616_*.md
 /CSP.md
 /config/fda_nitrosamines.json

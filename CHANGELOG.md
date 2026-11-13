@@ -7,6 +7,7 @@
 ```
 ✅ v5.1.1   (2026-11-02 修复 / 2026-11-09 生产运行验证)  ← 当前稳定基线，生产用这个
    └ 历史基线 v5.1-stable = v5.1.0（tag 停在 2026-10-27 提交；含 reorder 丢反馈等 5 项缺陷，勿回退部署）
+（v5.2.0 环境隔离 / v5.3.0 管线场景均为待生产验证的开发版，未打 stable tag；管线场景是**新增的第二张表**，不改变主表「CSP商机跟踪」的既有口径）
 （上一稳定线：v5.0-stable = v5.0.0（2026-10-10）；更早 v4.2-stable = v4.2.0（Excel 交付时代最后一版））
 （v5 线已合入 master 单线开发 —— master 即正式版；v3 / v4 worktree 目录与 v3 分支均已清理）
 ```
@@ -38,6 +39,7 @@
 
 | Tag | 日期 | 状态 | 说明 |
 |---|---|---|---|
+| **v5.3.0** | 2026-11-11 | 🧪 **待生产验证**（`package.json` 版本号由发布时统一改；未打 stable tag；**管线场景只跑过 dev 表，生产表未建立**） | **新增管线场景 = 第二张表「CSP管线商机」（主表 nitrosamine 零影响）**：① M1 CDE 受理采集（日期游标翻页）+ 评分卡 ② M2 口径与公司名归一 ③ M3 期次富化（CT.gov 代号/INN + 干预名精确校验，覆盖 48%）④ M4 交付层 `sheet.js` + `sync.js`（20 列 / 反馈 4 列销售独占 / 缩表护栏 / 幂等）⑤ M5 D4 大客户×2 + D5 事件强度 + D6 决策权 + D7 联系渠道类型（个人姓名电话邮箱不入表）⑥ 口径收紧并**排除进口（`J` 前缀）受理号** 317 行（1,125 → 808）⑦ `run.js` 一条命令编排 + 18 个月窗口 + 单步墙钟上限 30 分钟 ⑧ `sync.js --dedupe` 修账本同资产异写 ⑨ 口径外置 `config/pipeline-scope.json` ⑩ `npm test`（`node --test`）18 例覆盖评分卡/口径/表不变量。详见下方专节 |
 | **v5.2.0** | 2026-11-10 | 🧪 **待生产验证后转正**（`package.json` = 5.2.0；未打 stable tag） | **交付层 prod/dev 环境隔离 + 写入护栏**（开发机误跑即可写生产销售的表的唯一入口已堵）：① `WECOM_ENV` 选环境（缺省 prod → `config/wecom.json`，与老版路径一致 → 生产机零迁移；`dev` → `config/wecom.dev.json`；非 prod 建表自动命名 `CSP商机跟踪-<env>`）② 配置写入时盖章 `env` + `host` ③ 新增 `wecom.guardWrite(action)`：`sync` / `reorder` / `init` 写入前校验环境与主机归属，不匹配即拒绝并给出可执行命令，`WECOM_ADOPT=1` 仅用于换机一次性接管；只读命令（`status`/`feedback`/`checkip`）不受影响 ④ 写操作首行打「目标表 env/host/docid」，`pipeline` 尾部链接改走 `readCfg()`（dev 不再打印生产表链接）⑤ 群机器人通知仅 `prod` 环境发送（dev/test 环境即使 `.env` 里带着拷来的同一个 `WECOM_WEBHOOK_KEY` 也只打一行「群通知已跳过」，不往销售群发假新增；手动测推送格式用 `wecom-poc.js webhook`）⑥ **修复 `init` 建表后字段顺序反了**：`add_fields` 是前插，原先按 SCHEMA 正序添加 → 新表 UI 左→右完全倒序（只有 `reorder` 能纠正）；改为倒序添加，`init` 一次到位。（v5.2.0 建 dev 表时实测发现并修复）。⑦ 新增 `scripts/fda-refresh.js`：人工按需刷 FDA 元信息（仅页面版本/api 列表/Cat/AI limit，保留 `results` 与 `last_cdt_regno` 不影响增量采集），内置安全阀（抓取失败/解析异常/API 数骤降/页头取不到/pipeline 在跑/缓存损坏 → 拒写）+ 落盘前备份保留 5 份；该页为静态 HTML，无需浏览器/playwright/LLM。人工跑，不做 cron。遗漏：开发机未设 `WECOM_ENV` 且生产配置未补章时仍可能写生产表（已写入 README 残洞条） |
 | **v5.1.1** | 2026-11-02 | ✅ **当前稳定基线**（tag `v5.1.1`，无后缀 = 稳定版） | **交付层数据安全修复**（双模型并行审查驱动，均为「正常运维动作即可造成销售可见数据丢失」类缺陷）：① `reorder` 重建字段前备份并自动回写反馈 4 列（原先随字段删除永久消失，而 AGENTS.md 要求改列后必跑它）② 「只填跟进日期」与「表内有反馈但本轮快照里没这个键」不再被判无反馈删除（`recHasFeedback` 补日期 / `toDelete` 排除 feedbackKeys）③ 接入已有表 `init <docid>` 不再清理表内记录（空行清理只在新建表时执行）④ `sync` 新增缩表护栏（保留行数腰斩则拒写报错，`WECOM_ALLOW_SHRINK=1` 可越）⑤ 列一致性自检命中行改为清空分类三列而非照写进表；另：合并规则删掉 `regClass` 逐列兜底（消除「原研药 + 注册 4」唯一生成路径）、CDE 缓存改原子写（原先截断即全表清空三列）、`delete_records` 按 500 分批、`sync` 失败退出码置 1（cron 可感知）、`/lead-scan` 不再指向已废弃的 Markdown 报告、字段数口径 38→37 统一。验证：离线端到端自检 5 项全过（桩掉企微 API）；真快照 836 行 0 矛盾且分类分布与改前逐项一致；**2026-11-09 12:48 生产运行一次通过**（847 条 / 337 活跃 / 244 归档 / errors.log 0 字节；表内 338 条记录、4 条反馈正常） |
 | **v5.1.0** | 2026-10-27 | 稳定（已被 v5.1.1 取代；tag `v5.1-stable` 停在本次提交，勿回退部署） | 新机器部署审查修复：`wecom-sync.js init` 支持接入已有表格 + README 全面对齐 v5.0.0；生产运行明确脱离 pi（直接跑 `run-pipeline.js`，零 LLM 依赖）；版本登记表对齐（v3 退场 / `package.json` 版本号修正） |
@@ -64,6 +66,33 @@
 | v1.2 | 2026-07-17 | 历史 | CDT 持久连接 + 断连自动恢复 |
 | v1.1 | 2026-07-16 | 历史 | 增量搜索架构 + pipeline 脚本化 + 双源搜索 |
 | v1.0 | 2026-07-13 | 历史 | 起点 |
+
+---
+
+## v5.3.0：管线场景 —— 第二张表「CSP管线商机」（2026-11-11，待生产验证）
+
+**动机**：亚硝胺场景是「API 种子 → 按药名搜试验 → 申办方」，只能命中已上市的亚硝胺风险品种；而包装方案在 III 期/关键临床批就锁死（ICH Q1A(R2)：注册稳定性批次必须用拟上市包装），所以要一条「公司×资产」轴去抢封窗点。**交付上只是新增第二张表 + 独立账本，主表「CSP商机跟踪」的列定义、口径、运行方式完全不变。**
+
+| 里程碑 | 落地与实测 |
+|---|---|
+| M1 CDE 种子 + 评分卡 | `sources-cde.js` 按承办日期游标翻页：CDE 的 year/applytype 控件是 Vue 绑定，设 value + change 不生效（总数纹丝不动）→ 只能靠「列表天然按承办日期倒序 + 游标」翻页、本地过滤；全表 366 页 / 18,289 行 → 1,834 条公司×资产。`scoring.js` 纯函数评分卡（D1 剂型×2 / D2 理化风险×2 / D3 期次×1；G1 注射剂・生物药、G3 原料药出局） |
+| M2 口径 + 公司名归一 | 化药 + 注册分类 1/2.x；`scope.js` 归一**只做机械等价**（法人后缀、空白、全半角、`(中国)`），不做模糊合并 —— 错并会让两家公司共用一个商机键，销售反馈互相覆盖（比多两行更糟） |
+| M3 期次 | CT.gov 按资产代号（756 个命中 59%）+ 英文 INN（280 个命中 14%，多为已上市药的 PHASE4 → 按 D3 记 0）；**要求代号出现在本试验的干预名或标题里**：`query.term` 全文检索会把别人家的 III 期带回来（HRS-7058 被错抬 III 期、ACT001 被 CAR-NK 的 ACT-001 污染）。合计覆盖 48%；纯中文名 289 行需 CDT，列入 M3.5 |
+| M4 第二张表 | 「CSP管线商机」（dev 自动命名 `-dev`）；`WECOM_TABLE=pipeline` → `config/wecom-pipeline[.env].json`，与主表配置互不干扰，反馈账本独立 `output/history/feedback-pipeline.json`。实测两个必踩坑写死：数值单元格必须写裸数字（`{总分:9}`，带 `type` 会静默丢值）、URL 字段必须带 `property_url` |
+| M5 D4-D7 | D4 大客户×2（`config/pipeline-bigpharma.json` 12 个集团 + 子品牌别名；销售要求大客户加权，偏离调研的 ×1）/ D5 事件强度（期次 + 受理号第 4 位 `S`=上市申请、`L`=临床试验申请）/ D6 决策权（申请人中文名 + 法人后缀，代理指标）/ D7 可联系性（**只落渠道类型 + 企业域名，个人姓名/电话/邮箱不入表**：CT.gov 条款禁把 email 用于营销 + PIPL）。结果：A 74 / B 195 / C 213 / D 106；dev 表 274 行（A+B），重跑 0 新增 0 更新 |
+
+**同期改动（每项都写清了行为变化）**：
+
+- **排除进口（`J`）受理号**：`config/pipeline-scope.json` 设 `exclude_import: true`，剔除 317 行（1,125 → 808）。`J` 前缀 = 进口（境外主体持证），**不等于 license-in 交易** —— license-in/out 在 CDE 数据里看不见，只能靠 BD 公告或人工标注。代价：连带剔掉「境外公司在中国申报的创新药」，改一个布尔值即可回滚。**只作用于管线场景**。
+- **`run.js` 日常编排**：一条命令跑 采集 → 期次 → 渠道 → 同步；采集/富化失败告警后继续（账本是增量的，失败=本轮没新增），同步失败整体退出 1（交付没落地必须有人知道）。另加两处防事故：**18 个月窗口**（`最近受理日 > 18 个月且无反馈` 移出表，`PIPE_WINDOW_MONTHS` 可调；有反馈的行永不删）、**单步墙钟上限 30 分钟**（`PIPE_STEP_TIMEOUT_MIN`；卡住的步骤被杀掉并记失败，不会拖整晚）。
+- **`sync.js --dedupe`**：账本里「同资产异写」（历史键格式不同 → 同一资产存成两行）会在表里长出重复行；按 `原始公司名|原始药名` 合并（`last_seen` 较新者为主、`reg_nos` 取并集）。不加 `--dedupe` 时只在内存合并并提示，账本不动。
+- **口径外置**：`config/pipeline-scope.json`（药品类型 / 申请类型 / 注册分类 / `exclude_import`）取代代码内常量，`scope.js` 是唯一消费者；改口径不改代码，`node scenarios/pipeline/scope.js --apply` 就地裁剪账本。
+
+**验证与测试**：`npm test`（= `node --test scenarios/pipeline/test/*.test.js`）覆盖口径判定、评分卡权重/档位、表内不变量（商机键格式、总分=各维加权和、期次与 D3 不矛盾），本机 18 个用例全过；模块内置 assert 自检仍可用（`node scenarios/pipeline/scoring.js`、`scope.js`）。A 档抽验 LNK01001 / HTD1801 / TQH3906 / HRS-7058 / Giredestrant 与 CT.gov 一致；dev 表重跑幂等。**未在生产表跑过**。
+
+**未做 / 下一步**：生产表待建（`scp` 开发机账本 → `sync.js --init`；账本不随 git 走，重采要 1-2 小时）；纯中文名资产补期次（M3.5，CDT 中文药名）；M6 事件流（cninfo）等销售用满两周再评估；港股披露易 HKEXnews 因 ToS 明文禁止程序化访问，**不做**。
+
+**文件**：新增 `scenarios/pipeline/`（`sources-cde.js` / `scope.js` / `scoring.js` / `enrich-phase.js` / `enrich-contact.js` / `sheet.js` / `sync.js` / `run.js` / `SKILL.md` / `PLAN.md`）、`config/pipeline-scope.json`、`config/company-aliases.json`、`config/pipeline-bigpharma.json`；改动 `scripts/lib/wecom.js`（`WECOM_TABLE` 第二轴，主表零影响）。`config/pipeline-cursor.json`、`output/history/*` 在 gitignore 内。
 
 ---
 

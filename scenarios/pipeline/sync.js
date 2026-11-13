@@ -51,7 +51,7 @@ function dedupe(rows) {
 }
 const log = (...a) => console.log(...a);
 
-(async () => {
+async function main() {
   let store;
   try { store = JSON.parse(fs.readFileSync(FILE, 'utf8')); } catch (e) {
     console.error(`❌ 读不到 ${path.relative(WS, FILE)}（先跑 sources-cde.js）: ${e.message}`); process.exit(1);
@@ -84,4 +84,7 @@ const log = (...a) => console.log(...a);
   }
   const r = await sheet.sync(out, { dryRun: DRY });
   log(JSON.stringify(r, null, 1));
-})().catch(e => { console.error('❌', e.message); process.exit(1); });
+}
+
+module.exports = { dedupe };
+if (require.main === module) main().catch(e => { console.error('❌', e.message); process.exit(1); });

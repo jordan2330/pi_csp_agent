@@ -105,6 +105,12 @@ const S = (title, text) => {
   const opt = (f?.property_single_select?.options || []).find(o => o.text === text);
   return opt ? [{ id: opt.id, text: opt.text }] : [];
 };
+// 登记号 = 该资产**全部**受理号（升序，最多 3 个，超出用 `+N` 收尾）。
+// 只影响展示：商机键仍由 sync.js 用 `company|drugName` 生成，与受理号无关。
+function regNosText(r) {
+  const all = [...new Set([...(r.reg_nos || []), r.regNo, r.reg_no].filter(Boolean))].sort();
+  return all.length > 3 ? `${all.slice(0, 3).join(',')} +${all.length - 3}` : all.join(',');
+}
 function rowValues(r) {
   return {
     '商机键': W.V.text(r.key),
@@ -121,7 +127,7 @@ function rowValues(r) {
     '评分依据': W.V.text((r.notes || []).join('；')),
     '最近受理日': W.V.date(r.last_seen || r.date),
     '首次发现': W.V.date(r.first_seen),
-    '登记号': W.V.text(r.regNo || (r.reg_nos || []).join(',')),
+    '登记号': W.V.text(regNosText(r)),
     '详情链接': r.nct ? W.V.url(r.nct, `https://clinicaltrials.gov/study/${r.nct}`) : []
   };
 }
@@ -240,4 +246,13 @@ async function sync(rows, { dryRun = false } = {}) {
   return { added: toAdd.length, updated: toUpdate.length, deleted: toDelete.length, rows: keepCount, fbChanges: fbChanges.length, url: cfg.url };
 }
 
-module.exports = { SCHEMA, DATA_TITLES, FEEDBACK_TITLES, initTable, sync, rowValues, scalarOf, checkRows, FB_FILE };
+module.exports = { SCHEMA, DATA_TITLES, FEEDBACK_TITLES, initTable, sync, rowValues, regNosText, scalarOf, checkRows, FB_FILE };
+
+if (require.main === module) {
+  const assert = require('assert');
+  assert.equal(regNosText({ regNo: 'CXHL2601357', reg_nos: ['CXHL2601357', 'CXHL2600081'] }), 'CXHL2600081,CXHL2601357');
+  assert.equal(regNosText({ regNo: 'CXHL2609999' }), 'CXHL2609999');
+  assert.equal(regNosText({}), '');
+  assert.equal(regNosText({ reg_nos: ['CXHL2600004', 'CXHL2600001', 'CXHL2600003', 'CXHL2600002', 'CXHL2600005'] }), 'CXHL2600001,CXHL2600002,CXHL2600003 +2');
+  console.log('✅ 登记号展示自检通过');
+}

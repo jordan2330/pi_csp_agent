@@ -36,7 +36,7 @@ node scripts/wecom-sync.js reorder    # 只有改了字段/顺序才跑（破坏
 - **cdt-search-lib.js / browser.js** 是手：通过 CDP 连接 Windows 侧真实 Chrome 操作网页（端点由 `scripts/browser-connect.js` 解析）
 - **为什么必须真浏览器**：chinadrugtrials 已启用瑞数动态安全（JS 质询 + 浏览器指纹检测），headless/自动化浏览器会被拦截；早期用远程 browserless（机房 IP + 自动化指纹）已被封禁
 - **scenarios/** 是业务逻辑：每个场景一个独立 Skill，可插拔
-- **企微智能表格**是唯一交付**形态**（v5.0.0 起）：pipeline 同步；销售在同一链接看到最新线索并填跟进反馈（状态/负责人/备注）→ 每次同步回流 feedback.json 账本。**每场景一张表**（现有「CSP商机跟踪」；未来的管线/交易场景将另建「CSP管线商机」，不复用现有 37 列）
+- **企微智能表格**是唯一交付**形态**（v5.0.0 起）：pipeline 同步；销售在同一链接看到最新线索并填跟进反馈（状态/负责人/备注）→ 每次同步回流 feedback.json 账本。**每场景一张表**（「CSP商机跟踪」为主表；管线场景另建「CSP管线商机」，不复用现有 37 列，见下「管线场景」）
 
 ## 前置要求
 
@@ -254,6 +254,35 @@ node scripts/run-pipeline.js nitrosamine
 ```
 
 > 长任务（全量 3-4 小时）建议用 `systemd-run --user --unit=csp-scan ...` 托管，并先执行 `loginctl enable-linger $USER`，避免会话结束后被回收（详见 `scenarios/nitrosamine/SKILL.md`）。
+
+## 管线场景（CSP管线商机）
+
+第二个交付场景：**CDE 受理（化药 + 注册分类 1/2.x，排除进口 `J` 前缀受理号）→ 公司×资产 → 评分卡 → 企微第二张表「CSP管线商机」**。与亚硝胺共用浏览器采集与企微 API，但种子轴、行粒度、表、账本全独立，**不走 `run-pipeline.js`**。
+
+```bash
+node scenarios/pipeline/run.js                 # 日常：CDE 增量采集 → 期次 → 联系渠道 → 同步表
+node scenarios/pipeline/run.js --dry-run       # 只算不写表（看会写多少行）
+node scenarios/pipeline/run.js --skip-collect  # CDE 页面异常时：只富化 + 同步
+node scenarios/pipeline/run.js --no-sync       # 只更新本地账本，不碰表
+```
+
+**账本是派生物，丢了要重采 1-2 小时**：`output/history/pipeline-cde.json`（gitignore 内）→ 打分 → 表。采集只在一台机器跑（两台各跑会口径漂移），上生产表/重采前先备一份：
+
+```bash
+cp output/history/pipeline-cde.json output/history/pipeline-cde.bak-$(date +%F).json
+```
+
+**表选择**：管线场景恒指向第二张表（`WECOM_TABLE=pipeline`）→ `config/wecom-pipeline.json`（prod）/ `config/wecom-pipeline.dev.json`（dev），与主表配置互不干扰，反馈账本独立为 `output/history/feedback-pipeline.json`。开发机 `.env` 必须是 `WECOM_ENV=dev`（不设即 prod，直写生产表）。首次建表 `node scenarios/pipeline/sync.js --init`；账本出现「同资产异写」导致表里重复行时，`node scenarios/pipeline/sync.js --dedupe` 合并并落盘。
+
+**表内口径**：只放 A/B 档 ∪ 有反馈的行；`最近受理日 > 18 个月且无反馈` 自动移出（`PIPE_WINDOW_MONTHS` 可调），有反馈的行永不删。单步墙钟上限 30 分钟（`PIPE_STEP_TIMEOUT_MIN`），卡住的步骤被杀掉记失败，不会拖整晚。
+
+定时（与主表并列，择一）：
+
+```cron
+17 7 * * * cd $HOME/pi_csp_agent && node scenarios/pipeline/run.js >> output/pipeline-cron.log 2>&1
+```
+
+> 状态：目前只在 **dev 表**验证过，**生产表尚未建立**；口径细节（`config/pipeline-scope.json` / 评分卡 / 里程碑）见 `scenarios/pipeline/SKILL.md`、`PLAN.md`。
 
 ## 扩展功能
 
