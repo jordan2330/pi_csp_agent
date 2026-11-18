@@ -97,6 +97,19 @@ const log = (...a) => console.log(...a);
   if (!DRY) events.save(year, db);
   log(`\n抽取完成：有效 ${ok} / 复核 ${failed} | 账本新增 ${added} 合并 ${merged}${DRY ? '（--dry 未落盘）' : ''}`);
 
+  // 运行档案：周报要用它报健康度（抓了 0 条 = 源/Key 出问题，必须一眼看出）
+  if (!DRY) {
+    const f = path.join(WS, 'output', 'history', 'preclinical', 'runs.json');
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    const runs = (() => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return []; } })();
+    runs.push({
+      at: new Date().toISOString(), env: require(path.join(WS, 'scripts', 'lib', 'wecom.js')).envOf(),
+      raw: items.length, fresh: fresh.length, candidates: cands.length,
+      valid: ok, failed, added, merged
+    });
+    fs.writeFileSync(f, JSON.stringify(runs.slice(-120), null, 1));
+  }
+
   if (REPORT) {
     const out = path.resolve(WS, REPORT);
     fs.mkdirSync(path.dirname(out), { recursive: true });

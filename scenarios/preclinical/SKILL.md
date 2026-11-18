@@ -30,11 +30,22 @@ node scenarios/preclinical/sync.js --dry-run
 --recheck              （仅 enrich 类脚本有）重查已抽过的
 ```
 
-定时（建议每周一）：
+周报（推企微群，只 prod 推送；dev 只打印）：
+
+```bash
+node scenarios/preclinical/digest.js            # 最近 7 天
+node scenarios/preclinical/digest.js --days 14 --send   # 强制推送（含 dev，慎用）
+```
+
+周报顶部带健康度（抓取 N / 过闸 M / 事件 K）——抓到 0 条或抽出 0 条会红色告警，用来发现源失效或 Key 失效。
+
+定时（本机已装，每周一 07:17）：
 
 ```cron
-17 7 * * 1 cd <repo> && node scenarios/preclinical/run.js --since-hours 192 && node scenarios/preclinical/sync.js
+17 7 * * 1 cd $HOME/agents/pi_csp_agent && WECOM_ENV=dev /home/guoj01/.local/share/pi-node/current/bin/node scenarios/preclinical/run.js --since-hours 192 >> output/preclinical-cron.log 2>&1 && WECOM_ENV=dev <同上> scenarios/preclinical/sync.js >> output/preclinical-cron.log 2>&1 && WECOM_ENV=dev <同上> scenarios/preclinical/digest.js >> output/preclinical-cron.log 2>&1
 ```
+
+⚠️ **cron 的 PATH 里没有 node**（本机 node 由 pi 安装在 `~/.local/share/pi-node/current/bin/`）→ **必须用绝对路径**，否则 cron 静默失败（日志里只有 `node: command not found`）。同理 python3 在 `/usr/bin/python3`，pdfminer 装在 `--user` 下，cron 的 HOME 正确时才能 import。
 
 ## 数据源
 
