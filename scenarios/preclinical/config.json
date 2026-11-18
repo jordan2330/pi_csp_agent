@@ -1,0 +1,76 @@
+{
+  "_comment": "临床前信号场景（BD/授权/融资/里程碑）。feeds 来自内网 wechat2RSS（portproxy 127.0.0.1:18002），只选 BD/融资密度高的号。",
+  "rss_base": "http://127.0.0.1:18002/feed",
+  "feeds": {
+    "药时代": 3297644425,
+    "医药魔方": 3869681130,
+    "医药魔方Info": 3866669617,
+    "瞪羚社": 3578898622,
+    "动脉新医药": 3899076373,
+    "动脉网": 2391320846,
+    "健识局": 3212600297,
+    "药渡": 3092138474,
+    "新康界": 3098139616,
+    "摩熵医药": 3911350320,
+    "药智网": 3018091575,
+    "赛柏蓝": 2395083762
+  },
+  "google_news": [
+    {
+      "q": "临床前 授权 首付款",
+      "hl": "zh-CN&gl=CN&ceid=CN:zh-Hans"
+    },
+    {
+      "q": "创新药 出海 独家许可",
+      "hl": "zh-CN&gl=CN&ceid=CN:zh-Hans"
+    },
+    {
+      "q": "biotech 融资 A轮 创新药",
+      "hl": "zh-CN&gl=CN&ceid=CN:zh-Hans"
+    },
+    {
+      "q": "China biotech preclinical license agreement upfront",
+      "hl": "en-US&gl=US&ceid=US:en"
+    }
+  ],
+  "keywords": [
+    "授权",
+    "许可",
+    "首付款",
+    "里程碑付款",
+    "独家",
+    "引进",
+    "出海",
+    "NewCo",
+    "BD",
+    "融资",
+    "轮融资",
+    "A轮",
+    "B轮",
+    "C轮",
+    "Pre-IPO",
+    "临床前",
+    "PCC",
+    "IND",
+    "候选化合物",
+    "管线"
+  ],
+  "event_types": [
+    "license_out",
+    "license_in",
+    "financing",
+    "milestone",
+    "partnership",
+    "other"
+  ],
+  "llm": {
+    "model": "deepseek-v4.1-flash-1017",
+    "concurrency": 3,
+    "max_chars": 3000,
+    "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1"
+  },
+  "limits": {
+    "keep_days": 30,
+    "max_per_feed": 20
+  }
+}
