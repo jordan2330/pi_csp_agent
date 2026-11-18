@@ -53,6 +53,10 @@ const log = (...a) => console.log(...a);
     return;
   }
 
+  if (!process.env.DASHSCOPE_API_KEY) {
+    console.error('❌ 缺少 DASHSCOPE_API_KEY（.env 或环境变量）—— 抽取无法进行，直接失败（不做静默降级）');
+    process.exit(1);
+  }
   log('\n═══ 抽取（' + cfg.llm.model + '） ═══');
   const year = new Date().getFullYear();
   const db = events.load(year);

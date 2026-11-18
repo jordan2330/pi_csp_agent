@@ -13,12 +13,12 @@
 | 一行 | 公司 × 资产 | **一次事件**（公司×资产×类型×日期） |
 | 来源 | CDE 受理（法定、有受理号） | 新闻/公告（可能只有传闻） |
 | 判据 | 7 维评分卡 | 无评分，人工判断 |
-| 表 | 子表 1（20 列） | 子表 2（15 列） |
+| 表 | 子表 1（20 列） | 子表 2（22 列） |
 
 ## 日常运行
 
 ```bash
-node scenarios/preclinical/run.js --since-hours 168            # 每周：抓取 → 过滤 → 抽取 → 入账本
+node scenarios/preclinical/run.js --since-hours 192            # 每周：抓取 → 过滤 → 抽取 → 入账本（192h=8天，留跨周缓冲）
 node scenarios/preclinical/run.js --limit 50 --dry --report output/preclinical/review.md   # 只看不写，出人工复核表
 node scenarios/preclinical/run.js --no-llm                     # 只验证数据源（不需要 Key）
 node scenarios/preclinical/sync.js                             # 账本 → 子表（窗口 60 天 ∪ 有反馈）
@@ -44,20 +44,14 @@ node scenarios/preclinical/digest.js --days 14 --send   # 强制推送（含 dev
 三个场景共用一台机器、两处会互相干扰：**Chrome（CDP 9223）** 与 **企微 token 缓存**。
 所以**必须串行**且时间错开；管线交易只用 HTTP，不受 Chrome 影响。
 
-crontab（生产机；本机不装）：
+本场景只需要一条（其他场景的 cron 见各自 SKILL）：
 
 ```cron
 PATH=/home/guoj01/.local/share/pi-node/current/bin:/usr/local/bin:/usr/bin:/bin
-
-# 07:10 临床阶段管线（用 Chrome）
-10 7 * * *  cd ~/agents/pi_csp_agent && flock -n /tmp/csp-chrome.lock node scenarios/pipeline/run.js >> output/cron-pipeline.log 2>&1
-
-# 07:40 主表 nitrosamine（用 Chrome，错开 30 分钟）
-40 7 * * *  cd ~/agents/pi_csp_agent && flock -n /tmp/csp-chrome.lock node scripts/run-pipeline.js >> output/cron-main.log 2>&1
-
-# 周一 08:20 管线交易（不用 Chrome）
 20 8 * * 1  cd ~/agents/pi_csp_agent && node scenarios/preclinical/weekly.js >> output/cron-deals.log 2>&1
 ```
+
+本场景**不用 Chrome**，所以不与管线/主表抢 CDP；只要不与它们的 **`sync` 写表** 撞在同一秒即可（时间错开足够）。
 
 - `flock -n`：抢不到锁就跳过本轮，避免"上一轮跑超时把下一轮搞乱"
 - 日志分三个文件，出问题能一眼定位场景

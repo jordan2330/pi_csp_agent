@@ -23,21 +23,15 @@ process.env.WECOM_TABLE = 'preclinical';
 const events = require('./lib/events');
 const { match } = require('./lib/match');
 
-const arg = (n, d) => { const i = process.argv.indexOf(n); return i !== -1 && process.argv[i + 1] ? Number(process.argv[i + 1]) : d; };
-const DAYS = arg('--days', 7);
+const DAYS = 7;                                    // 固定一周；要改窗口直接改这行
 const FORCE = process.argv.includes('--send');
+const NO_SEND = process.argv.includes('--no-send');   // weekly --dry 时传，避免发出过期周报
 
 const TYPE_CN = { license_out: '授权出海', license_in: '引进', financing: '融资', milestone: '里程碑', partnership: '合作', other: '其他' };
-const money = (m) => (m ? `${m >= 1000 ? (m / 1000).toFixed(2) + '十亿' : m}M` : '');
+const money = (m) => (!m ? '' : m >= 1000 ? `${(m / 1000).toFixed(2)} 亿美元` : `${m} 百万美元`);
 
-function rank(e) {
-  let s = 0;
-  if (e.amount_total_usd_m || e.amount_upfront_usd_m) s += 4;
-  if (match(e).hit === '是') s += 3;
-  if (e.china_rights === 'retained') s += 1;
-  if (e.territory_scope === 'ex_greater_china' || e.territory_scope === 'global') s += 1;
-  return s;
-}
+// 排序只看两件事：有没有金额、是不是已有资产（其余权重是拍的，删掉）
+const rank = (e) => (e.amount_total_usd_m || e.amount_upfront_usd_m ? 2 : 0) + (match(e).hit === '是' ? 1 : 0);
 
 function line(e) {
   const who = e.company_raw ? `${e.company_raw}${e.counterparty_raw ? ' × ' + e.counterparty_raw : ''}` : (e.counterparty_raw || '未知');
@@ -50,7 +44,8 @@ function line(e) {
 (async () => {
   const year = new Date().getFullYear();
   const all = [...Object.values(events.load(year - 1).events), ...Object.values(events.load(year).events)];
-  const since = new Date(Date.now() - DAYS * 864e5).toISOString().slice(0, 10);
+  const bjDate = (ms) => new Date(ms + 8 * 3600e3).toISOString().slice(0, 10);   // 统一用北京时间（文章 pubDate 是 +08:00）
+  const since = bjDate(Date.now() - DAYS * 864e5);
   const fresh = all.filter(e => (e.date || '') >= since);
 
   const runsFile = path.join(WS, 'output', 'history', 'preclinical', 'runs.json');
@@ -69,13 +64,19 @@ function line(e) {
   const lastAt = runs.length ? Date.parse(runs[runs.length - 1].at || '') : NaN;
   const ageH = Number.isFinite(lastAt) ? Math.round((Date.now() - lastAt) / 3600e3) : null;
   let health = `抓取 ${st.raw} ｜ 过闸 ${st.candidates} ｜ 事件 ${st.valid}`;
-  if (ageH != null && ageH > 192) health += `　⚠️ 上次抓取在 ${Math.round(ageH / 24)} 天前（cron 可能被跳过了）`;
-  if (!recentRuns.length) health = '本周尚无运行档案（run.js 还没跑过）';
-  else if (st.raw === 0) health = '⚠️ **本周没有抓到任何内容** —— 检查 wechat2RSS / cninfo / API Key';
-  else if (st.valid === 0) health = `⚠️ 抓了 ${st.raw} 条，但一条事件都没抽出来 —— 检查模型/Key`;
+  if (!recentRuns.length) {
+    health = ageH == null ? '本周无运行档案（run.js 还没跑过）'
+      : `⚠️ **本周无运行记录，上次抓取在 ${Math.round(ageH / 24)} 天前** —— cron 可能被跳过或失败了`;
+  } else if (st.raw === 0) {
+    health = '⚠️ **本周没有抓到任何内容** —— 检查 wechat2RSS / cninfo / API Key';
+  } else if (st.valid === 0) {
+    health = `⚠️ 抓了 ${st.raw} 条，但一条事件都没抽出来 —— 检查模型/Key`;
+  } else if (ageH != null && ageH > 192) {
+    health += `　⚠️ 上次抓取在 ${Math.round(ageH / 24)} 天前（cron 可能被跳过了）`;
+  }
 
   const md = [
-    `**管线交易周报 ${since} ~ ${new Date().toISOString().slice(0, 10)}**`,
+    `**管线交易周报 ${since} ~ ${bjDate(Date.now())}**`,
     `本周新增 <font color="info">${fresh.length}</font> 条 ｜ 命中已有资产 <font color="warning">${inBook}</font> 条`,
     `> ${health}`,
     '',
@@ -87,6 +88,7 @@ function line(e) {
 
   console.log(md);
   const env = W.envOf();
+  if (NO_SEND) { console.log('\n（--no-send，仅打印）'); return; }
   if (!FORCE && env !== 'prod') { console.log(`\n（WECOM_ENV=${env}，仅打印不推送；要强推 --send）`); return; }
   if (!process.env.WECOM_WEBHOOK_KEY) { console.log('\n（未配 WECOM_WEBHOOK_KEY，跳过推送）'); return; }
   await W.webhook.send(md);

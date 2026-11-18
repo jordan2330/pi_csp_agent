@@ -20,7 +20,8 @@ const dry = has('--dry') ? ['--dry'] : [];
 const steps = [
   { name: '抓取抽取', script: 'run.js', args: ['--since-hours', '192', ...dry], fatal: true },
   { name: '同步子表', script: 'sync.js', args: [...(has('--dry') ? ['--dry-run'] : [])], fatal: true },
-  { name: '周报推送', script: 'digest.js', args: [], fatal: false }
+  // --dry 时不让它推群：账本/表都没写，推出去的是过期内容
+  { name: '周报推送', script: 'digest.js', args: [...(has('--dry') ? ['--no-send'] : [])], fatal: false }
 ];
 
 (async () => {
