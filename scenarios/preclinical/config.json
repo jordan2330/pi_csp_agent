@@ -1,5 +1,5 @@
 {
-  "_comment": "临床前信号场景（BD/授权/融资/里程碑）。feeds 来自内网 wechat2RSS（portproxy 127.0.0.1:18002），只选 BD/融资密度高的号。",
+  "_comment": "管线交易信息（全阶段：临床前/临床/NDA 的 BD、授权、融资、里程碑）。feeds 来自内网 wechat2RSS（portproxy 127.0.0.1:18002）。目录名 preclinical 是历史遗留。",
   "rss_base": "http://127.0.0.1:18002/feed",
   "feeds": {
     "药时代": 3297644425,

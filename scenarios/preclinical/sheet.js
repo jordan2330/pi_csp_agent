@@ -33,6 +33,8 @@ const SCHEMA = [
   { field_title: '中国公司', field_type: 'FIELD_TYPE_TEXT' },
   { field_title: '对方', field_type: 'FIELD_TYPE_TEXT' },
   { field_title: '资产/代号', field_type: 'FIELD_TYPE_TEXT' },
+  { field_title: '剂型', field_type: 'FIELD_TYPE_TEXT' },          // 原文没写就留空（CSP 选型看剂型，但新闻常不写）
+
   { field_title: '阶段', field_type: 'FIELD_TYPE_SINGLE_SELECT', property_single_select: { options: [sel('临床前', 12), sel('IND', 9), sel('I期', 16), sel('II期', 16), sel('III期', 11), sel('NDA/上市', 20)] } },
   { field_title: '金额', field_type: 'FIELD_TYPE_TEXT' },
   { field_title: '摘要', field_type: 'FIELD_TYPE_TEXT' },
@@ -46,6 +48,10 @@ const SCHEMA = [
 
 const FB = ['是否已有客户', '跟进状态', '负责人', '备注'];
 const DATA = SCHEMA.map(f => f.field_title).filter(t => !FB.includes(t));
+// 剂型：LLM 抽到就用；抽不到时从资产名/标题里按词表兜底（「HSK47388片」「SIM0725注射液」）
+const FORM_RE = /(注射液|注射剂|冻干粉针|粉针剂|预灌封注射器|输液|片剂|缓释片|控释片|肠溶片|分散片|咀嚼片|口崩片|口溶膜|胶囊|软胶囊|缓释胶囊|肠溶胶囊|颗粒剂|颗粒|散剂|口服溶液|口服液|混悬液|干混悬剂|糖浆|合剂|鼻喷雾剂|喷雾剂|气雾剂|吸入粉雾剂|吸入剂|滴眼液|眼用凝胶|滴鼻液|乳膏|软膏|凝胶剂|贴剂|贴片|栓剂|滴丸|皮下注射|静脉注射)/;
+const dosageForm = (ev) => ev.dosage_form_raw || (String(ev.asset_raw || '').match(FORM_RE) || [])[0] || (String(ev.sources?.[0]?.title || '').match(FORM_RE) || [])[0] || '';
+
 const TYPE_MAP = { license_out: '授权出海', license_in: '引进', financing: '融资', milestone: '里程碑', partnership: '合作', other: '合作' };
 // 顺序敏感："III期".includes("I期") 为真 → 必须先匹配 III，再 II，最后 I；IND 要在 NDA 之前（"获批临床"含"获批"）
 const PHASE_MAP = [
@@ -81,6 +87,7 @@ function rowValues(ev) {
     '中国公司': W.V.text(ev.company_raw || ''),
     '对方': W.V.text(ev.counterparty_raw || ''),
     '资产/代号': W.V.text(ev.asset_raw || ''),
+    '剂型': W.V.text(dosageForm(ev)),
     '阶段': S('阶段', phase),
     '金额': W.V.text(targetText(ev)),
     '摘要': W.V.text(summaryOf(ev)),
@@ -101,6 +108,23 @@ const scalarOf = (title, v) => {
 async function initTable() {
   const cfg = readCfg();
   if (!cfg.docid || !cfg.sheet_id) throw new Error(`缺 ${path.relative(WS, cfgFile())}（docid/sheet_id）`);
+  if (process.env.PRECLINICAL_REBUILD === '1') {
+    // 重建：add_fields 是前插，改列顺序只能清空重来（行由账本重建；销售未填反馈时才可用）
+    const recs = await W.sheet.getRecords(cfg.docid, cfg.sheet_id);
+    if (recs.some(r => r.values?.['跟进状态'] || r.values?.['备注'])) throw new Error('表里已有销售反馈，拒绝重建（会丢反馈）');
+    if (recs.length) await W.sheet.deleteRecords(cfg.docid, cfg.sheet_id, recs.map(r => r.record_id));
+    // 实测：一次删光全部字段会报 2000055，且主字段不能删 → 留第一个，其余分批（5 个一批）删
+    const flds = (await W.sheet.getFields(cfg.docid, cfg.sheet_id)).fields || [];
+    for (let i = 1; i < flds.length; i += 5) {
+      await W.sheet.deleteFields(cfg.docid, cfg.sheet_id, flds.slice(i, i + 5).map(f => f.field_id));
+      await new Promise(r => setTimeout(r, 800));
+    }
+    await W.sheet.addFields(cfg.docid, cfg.sheet_id, SCHEMA.filter(f => f.field_title !== '事件键').slice().reverse());
+    const t = (await W.sheet.getFields(cfg.docid, cfg.sheet_id)).fields.find(f => f.field_type === 'FIELD_TYPE_TEXT');
+    await W.sheet.updateFields(cfg.docid, cfg.sheet_id, [{ field_id: t.field_id, field_title: '事件键', field_type: t.field_type }]);
+    log(`子表已重建：${SCHEMA.length} 列`);
+    return readCfg();
+  }
   const have = new Map(((await W.sheet.getFields(cfg.docid, cfg.sheet_id)).fields || []).map(f => [f.field_title, f]));
   const texts = [...have.values()].filter(f => f.field_type === 'FIELD_TYPE_TEXT');
   // 默认空表只有一个「智能表列」→ 改名为「事件键」；再倒序补其余列（add_fields 前插）
