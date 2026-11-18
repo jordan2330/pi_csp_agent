@@ -10,6 +10,7 @@
 
 const path = require('path');
 const W = require(path.join(__dirname, '..', '..', 'scripts', 'lib', 'wecom.js'));
+const { match } = require('./lib/match');
 
 const WS = path.resolve(__dirname, '..', '..');
 const log = (...a) => console.log(...a);
@@ -26,18 +27,26 @@ const S = (title, text) => {
   return opt ? [{ id: opt.id, text: opt.text }] : [];     // 选项里没有该值 → 留空（如阶段未知）
 };
 
+const NUM = (t) => ({ field_title: t, field_type: 'FIELD_TYPE_NUMBER', property_number: { decimal_places: 1, use_separator: false } });
+
 const SCHEMA = [
   { field_title: '事件键', field_type: 'FIELD_TYPE_TEXT' },
   { field_title: '事件日期', field_type: 'FIELD_TYPE_DATE_TIME', property_date_time: { format: 'yyyy-mm-dd' } },
   { field_title: '类型', field_type: 'FIELD_TYPE_SINGLE_SELECT', property_single_select: { options: [sel('授权出海', 12), sel('引进', 9), sel('融资', 11), sel('里程碑', 16), sel('合作', 20)] } },
   { field_title: '中国公司', field_type: 'FIELD_TYPE_TEXT' },
   { field_title: '对方', field_type: 'FIELD_TYPE_TEXT' },
+  { field_title: '对方类型', field_type: 'FIELD_TYPE_SINGLE_SELECT', property_single_select: { options: [sel('MNC', 12), sel('中国药企', 9), sel('投资机构', 16), sel('NewCo', 11), sel('CDMO', 20), sel('其他', 16)] } },
   { field_title: '资产/代号', field_type: 'FIELD_TYPE_TEXT' },
-  { field_title: '剂型', field_type: 'FIELD_TYPE_TEXT' },          // 原文没写就留空（CSP 选型看剂型，但新闻常不写）
-
+  { field_title: '剂型', field_type: 'FIELD_TYPE_TEXT' },
+  { field_title: '治疗领域', field_type: 'FIELD_TYPE_SINGLE_SELECT', property_single_select: { options: [sel('肿瘤', 12), sel('自免/炎症', 9), sel('代谢/减重', 11), sel('CNS', 16), sel('呼吸', 16), sel('感染/疫苗', 20), sel('心血管/肾病', 20), sel('眼科', 20), sel('其他', 20), sel('未知', 20)] } },
   { field_title: '阶段', field_type: 'FIELD_TYPE_SINGLE_SELECT', property_single_select: { options: [sel('临床前', 12), sel('IND', 9), sel('I期', 16), sel('II期', 16), sel('III期', 11), sel('NDA/上市', 20)] } },
-  { field_title: '金额', field_type: 'FIELD_TYPE_TEXT' },
+  NUM('首付款(百万美元)'),
+  NUM('交易总额(百万美元)'),
+  { field_title: '金额原文', field_type: 'FIELD_TYPE_TEXT' },
+  { field_title: '授权范围', field_type: 'FIELD_TYPE_SINGLE_SELECT', property_single_select: { options: [sel('全球', 12), sel('大中华区以外', 9), sel('含大中华区', 11), sel('区域性', 16), sel('未知', 20)] } },
+  { field_title: '中国权益', field_type: 'FIELD_TYPE_SINGLE_SELECT', property_single_select: { options: [sel('保留', 11), sel('已授出', 16), sel('未知', 20)] } },
   { field_title: '摘要', field_type: 'FIELD_TYPE_TEXT' },
+  { field_title: '已在资产表', field_type: 'FIELD_TYPE_SINGLE_SELECT', property_single_select: { options: [sel('是', 11), sel('否', 16)] } },
   { field_title: '来源', field_type: 'FIELD_TYPE_URL', property_url: { type: 'LINK_TYPE_ICON_TEXT' } },
   // ↓ 销售独占写
   { field_title: '是否已有客户', field_type: 'FIELD_TYPE_SINGLE_SELECT', property_single_select: { options: [sel('是', 11), sel('否', 16), sel('待确认', 20)] } },
@@ -52,6 +61,8 @@ const DATA = SCHEMA.map(f => f.field_title).filter(t => !FB.includes(t));
 const FORM_RE = /(注射液|注射剂|冻干粉针|粉针剂|预灌封注射器|输液|片剂|缓释片|控释片|肠溶片|分散片|咀嚼片|口崩片|口溶膜|胶囊|软胶囊|缓释胶囊|肠溶胶囊|颗粒剂|颗粒|散剂|口服溶液|口服液|混悬液|干混悬剂|糖浆|合剂|鼻喷雾剂|喷雾剂|气雾剂|吸入粉雾剂|吸入剂|滴眼液|眼用凝胶|滴鼻液|乳膏|软膏|凝胶剂|贴剂|贴片|栓剂|滴丸|皮下注射|静脉注射)/;
 const dosageForm = (ev) => ev.dosage_form_raw || (String(ev.asset_raw || '').match(FORM_RE) || [])[0] || (String(ev.sources?.[0]?.title || '').match(FORM_RE) || [])[0] || '';
 
+const SCOPE_MAP = { global: '全球', ex_greater_china: '大中华区以外', greater_china: '含大中华区', regional: '区域性', unknown: '未知' };
+const RIGHTS_MAP = { retained: '保留', excluded: '已授出', unknown: '未知' };
 const TYPE_MAP = { license_out: '授权出海', license_in: '引进', financing: '融资', milestone: '里程碑', partnership: '合作', other: '合作' };
 // 顺序敏感："III期".includes("I期") 为真 → 必须先匹配 III，再 II，最后 I；IND 要在 NDA 之前（"获批临床"含"获批"）
 const PHASE_MAP = [
@@ -69,13 +80,10 @@ const readCfg = () => W.readCfg();
 
 function targetText(ev) {
   const a = ev.amount_upfront_raw, b = ev.amount_total_raw;
-  return [a, b].filter(Boolean).join(' / ') || (ev.amount_total_raw || '');
+  return (a && b && a === b) ? a : [a, b].filter(Boolean).join(' / ');
 }
 function summaryOf(ev) {
-  const bits = [];
-  if (ev.territory_raw) bits.push(ev.territory_raw);
-  if (ev.asset_raw) bits.push(ev.asset_raw);
-  return (bits.join('｜') || '').slice(0, 200);
+  return (ev.one_liner || [ev.territory_raw, ev.asset_raw].filter(Boolean).join('｜') || '').slice(0, 200);
 }
 
 function rowValues(ev) {
@@ -86,11 +94,18 @@ function rowValues(ev) {
     '类型': S('类型', TYPE_MAP[ev.type] || '合作'),
     '中国公司': W.V.text(ev.company_raw || ''),
     '对方': W.V.text(ev.counterparty_raw || ''),
+    '对方类型': S('对方类型', ev.counterparty_type || '其他'),
     '资产/代号': W.V.text(ev.asset_raw || ''),
     '剂型': W.V.text(dosageForm(ev)),
+    '治疗领域': S('治疗领域', ev.therapeutic_area || '未知'),
     '阶段': S('阶段', phase),
-    '金额': W.V.text(targetText(ev)),
+    '首付款(百万美元)': ev.amount_upfront_usd_m ?? '',
+    '交易总额(百万美元)': ev.amount_total_usd_m ?? '',
+    '金额原文': W.V.text(targetText(ev)),
+    '授权范围': S('授权范围', SCOPE_MAP[ev.territory_scope] || '未知'),
+    '中国权益': S('中国权益', RIGHTS_MAP[ev.china_rights] || '未知'),
     '摘要': W.V.text(summaryOf(ev)),
+    '已在资产表': S('已在资产表', match(ev).hit),
     '来源': ev.sources?.[0]?.url ? W.V.url(ev.sources[0].title?.slice(0, 40) || '原文', ev.sources[0].url) : ''
   };
 }
