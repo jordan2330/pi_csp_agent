@@ -66,7 +66,10 @@ function line(e) {
   const top = fresh.slice().sort((a, b) => rank(b) - rank(a) || String(b.date).localeCompare(String(a.date))).slice(0, 8);
   const inBook = fresh.filter(e => match(e).hit === '是').length;
 
+  const lastAt = runs.length ? Date.parse(runs[runs.length - 1].at || '') : NaN;
+  const ageH = Number.isFinite(lastAt) ? Math.round((Date.now() - lastAt) / 3600e3) : null;
   let health = `抓取 ${st.raw} ｜ 过闸 ${st.candidates} ｜ 事件 ${st.valid}`;
+  if (ageH != null && ageH > 192) health += `　⚠️ 上次抓取在 ${Math.round(ageH / 24)} 天前（cron 可能被跳过了）`;
   if (!recentRuns.length) health = '本周尚无运行档案（run.js 还没跑过）';
   else if (st.raw === 0) health = '⚠️ **本周没有抓到任何内容** —— 检查 wechat2RSS / cninfo / API Key';
   else if (st.valid === 0) health = `⚠️ 抓了 ${st.raw} 条，但一条事件都没抽出来 —— 检查模型/Key`;

@@ -39,13 +39,33 @@ node scenarios/preclinical/digest.js --days 14 --send   # 强制推送（含 dev
 
 周报顶部带健康度（抓取 N / 过闸 M / 事件 K）——抓到 0 条或抽出 0 条会红色告警，用来发现源失效或 Key 失效。
 
-定时（本机已装，每周一 07:17）：
+## 三个 cron 与互斥
+
+三个场景共用一台机器、两处会互相干扰：**Chrome（CDP 9223）** 与 **企微 token 缓存**。
+所以**必须串行**且时间错开；管线交易只用 HTTP，不受 Chrome 影响。
+
+crontab（生产机；本机不装）：
 
 ```cron
-17 7 * * 1 cd $HOME/agents/pi_csp_agent && WECOM_ENV=dev /home/guoj01/.local/share/pi-node/current/bin/node scenarios/preclinical/run.js --since-hours 192 >> output/preclinical-cron.log 2>&1 && WECOM_ENV=dev <同上> scenarios/preclinical/sync.js >> output/preclinical-cron.log 2>&1 && WECOM_ENV=dev <同上> scenarios/preclinical/digest.js >> output/preclinical-cron.log 2>&1
+PATH=/home/guoj01/.local/share/pi-node/current/bin:/usr/local/bin:/usr/bin:/bin
+
+# 07:10 临床阶段管线（用 Chrome）
+10 7 * * *  cd ~/agents/pi_csp_agent && flock -n /tmp/csp-chrome.lock node scenarios/pipeline/run.js >> output/cron-pipeline.log 2>&1
+
+# 07:40 主表 nitrosamine（用 Chrome，错开 30 分钟）
+40 7 * * *  cd ~/agents/pi_csp_agent && flock -n /tmp/csp-chrome.lock node scripts/run-pipeline.js >> output/cron-main.log 2>&1
+
+# 周一 08:20 管线交易（不用 Chrome）
+20 8 * * 1  cd ~/agents/pi_csp_agent && node scenarios/preclinical/weekly.js >> output/cron-deals.log 2>&1
 ```
 
-⚠️ **cron 的 PATH 里没有 node**（本机 node 由 pi 安装在 `~/.local/share/pi-node/current/bin/`）→ **必须用绝对路径**，否则 cron 静默失败（日志里只有 `node: command not found`）。同理 python3 在 `/usr/bin/python3`，pdfminer 装在 `--user` 下，cron 的 HOME 正确时才能 import。
+- `flock -n`：抢不到锁就跳过本轮，避免"上一轮跑超时把下一轮搞乱"
+- 日志分三个文件，出问题能一眼定位场景
+- 主表最重（CT.gov + CDT + 富化），放在两个轻的之后
+- **cron 的 PATH 里没有 node**（本机 node 由 pi 装在 `~/.local/share/pi-node/current/bin/`）→
+  crontab 顶部设 `PATH` 或全用绝对路径，否则静默失败。`pdfminer` 装在 `--user`，cron 的 HOME 正确才能 import
+
+`weekly.js` = 抓取抽取 → 同步子表 → 推周报；前两步失败即停（没数据不必发周报），周报失败只告警。
 
 ## 数据源
 
