@@ -14,6 +14,7 @@ const fs = require('fs');
 const path = require('path');
 const cfg = require('./config.json');
 const { fetchWechat, fetchGoogleNews } = require('./lib/rss');
+const { fetchCninfo } = require('./lib/cninfo');
 const { candidates } = require('./lib/filter');
 const { extractOne } = require('./lib/extract');
 const events = require('./lib/events');
@@ -31,8 +32,12 @@ const REPORT = (() => { const i = process.argv.indexOf('--report'); return i !==
 const log = (...a) => console.log(...a);
 
 (async () => {
-  log(`═══ 抓取（${Object.keys(cfg.feeds).length} 个公众号 + ${cfg.google_news.length} 组 Google News） ═══`);
-  const items = [...await fetchWechat(cfg, log), ...await fetchGoogleNews(cfg, log)];
+  log(`═══ 抓取（${Object.keys(cfg.feeds).length} 个公众号 + ${cfg.google_news.length} 组 Google News + ${(cfg.cninfo_queries || []).length} 组 cninfo） ═══`);
+  const items = [
+    ...await fetchWechat(cfg, log),
+    ...await fetchCninfo(cfg, { hours: SINCE_H, log }),
+    ...await fetchGoogleNews(cfg, log)
+  ];
   const since = Date.now() - SINCE_H * 3600e3;
   const fresh = items.filter(it => !it.published || Date.parse(it.published) >= since);
   log(`\n共 ${items.length} 条，${SINCE_H}h 内 ${fresh.length} 条`);
