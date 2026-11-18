@@ -48,6 +48,10 @@ node scripts/wecom-sync.js reorder    # 只有改了字段/顺序才跑（破坏
 - **网络**：需能访问 `dashscope.aliyuncs.com`、`fda.gov`、`chinadrugtrials.org.cn`、`clinicaltrials.gov`、`qyapi.weixin.qq.com`
 - **一次性配置**：`C:\Users\<你>\.wslconfig` 加入 `networkingMode=mirrored`，然后 `wsl --shutdown` 重启（让 WSL 能访问 Windows 的 `127.0.0.1:9223`）
 
+## 生产部署
+
+新机器从零部署（或换机迁移）见 **`docs/deploy-production.md`**：前置条件、WSL mirrored 网络、Chrome 专用 profile、Node/Python 依赖、`.env` 四个密钥、企微后台配置、三张表初始化、账本迁移、cron、上线 12 条验收清单、日常运维与回滚。
+
 ## 快速开始
 
 ```bash
