@@ -247,10 +247,11 @@ node scripts/run-pipeline.js nitrosamine
 
 ## 定时任务
 
-每周一早上 8 点自动运行（WSL 内 crontab）：
+**三条 cron 的完整写法只在 `docs/cron.md` 维护**（含 PATH、flock 互斥、上线前四步验证、常见故障）。
 
 ```cron
-0 8 * * 1 cd $HOME/pi_csp_agent && bash scripts/launch-chrome.sh && node scripts/run-pipeline.js nitrosamine >> output/runs/cron.log 2>&1
+# 07:40 主表（用 Chrome，与临床阶段管线共用一把锁 → 必须错开）
+40 7 * * *  cd $HOME/agents/pi_csp_agent && flock -n /tmp/csp-chrome.lock node scripts/run-pipeline.js nitrosamine >> output/cron-main.log 2>&1
 ```
 
 > 长任务（全量 3-4 小时）建议用 `systemd-run --user --unit=csp-scan ...` 托管，并先执行 `loginctl enable-linger $USER`，避免会话结束后被回收（详见 `scenarios/nitrosamine/SKILL.md`）。
@@ -276,10 +277,10 @@ cp output/history/pipeline-cde.json output/history/pipeline-cde.bak-$(date +%F).
 
 **表内口径**：只放 A/B 档 ∪ 有反馈的行；`最近受理日 > 18 个月且无反馈` 自动移出（`PIPE_WINDOW_MONTHS` 可调），有反馈的行永不删。单步墙钟上限 30 分钟（`PIPE_STEP_TIMEOUT_MIN`），卡住的步骤被杀掉记失败，不会拖整晚。
 
-定时（与主表并列，择一）：
+定时见 `docs/cron.md`（三条 cron 的唯一出处）：
 
 ```cron
-17 7 * * * cd $HOME/pi_csp_agent && node scenarios/pipeline/run.js >> output/pipeline-cron.log 2>&1
+10 7 * * *  cd $HOME/agents/pi_csp_agent && flock -n /tmp/csp-chrome.lock node scenarios/pipeline/run.js >> output/cron-pipeline.log 2>&1
 ```
 
 > 状态：目前只在 **dev 表**验证过，**生产表尚未建立**；口径细节（`config/pipeline-scope.json` / 评分卡 / 里程碑）见 `scenarios/pipeline/SKILL.md`、`PLAN.md`。

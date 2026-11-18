@@ -141,7 +141,7 @@ node scenarios/pipeline/run.js --tiers A       # 只同步 A 档
 node scenarios/pipeline/run.js --no-sync       # 只更新本地账本
 ```
 
-定时（与主表并列，择一）：`17 7 * * * cd <repo> && node scenarios/pipeline/run.js >> output/pipeline-cron.log 2>&1`
+定时：见 `docs/cron.md`（三条 cron 的唯一出处；本场景与主表共用 `flock -n /tmp/csp-chrome.lock`，必须错开时间）
 
 单步墙钟上限 30 分钟（`PIPE_STEP_TIMEOUT_MIN` 可调）：卡住的步骤会被杀掉并记为失败，不会拖整晚。
 
