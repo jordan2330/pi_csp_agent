@@ -16,7 +16,8 @@ const SYSTEM = `你是医药行业信息抽取器。只抽取文中明确写出�
 - type: license_out | license_in | financing | milestone | partnership | other
   （license_out=中国公司把权益授出；license_in=中国公司引进境外品种；financing=融资/IPO；
     milestone=研发/临床里程碑；partnership=合作但不涉授权）
-- company_raw: 文中主角公司名（原文写法，最多两个用 / 分隔）
+- company_cn: **中国的**公司名（原文写法）。这是本表的行主角，必须是注册地/主体在中国的企业（含港股/美股上市的中国 biotech，如信达生物、百济神州、荣昌生物）
+- counterparty_raw: 交易对方（通常是 MNC 或境外公司，如默沙东、诺华、Ollin）；无则空
 - asset_raw: 涉及的药品/资产名或代号（无则空字符串）
 - phase_raw: 文中提到的阶段原文（如「临床前」「I期」「IND」；无则空）
 - amount_upfront_raw: 首付款/近期付款的原文金额（无则空）
@@ -26,7 +27,12 @@ const SYSTEM = `你是医药行业信息抽取器。只抽取文中明确写出�
 - evidence_quote: 从【正文】中原样复制的一段话（20–80 字），必须是判断该事件的依据
 - confidence: 0-1，你对 is_event 与字段的把握
 
-若 is_event=false，其余字段可为空字符串。`;
+判定规则（重要）：
+1. **必须是中国公司在做交易**（授出/引进/融资/里程碑/合作）。若通篇只是 MNC 在中国的采购、或中国公司只是被顺带提及，则 is_event=false。
+2. **综述/盘点/周报/会议报道/书评/评论**（标题含「一周药闻」「盘点」「汇总」「大会」「解读」「好书推荐」「为什么」「怎么看」等）一律 is_event=false。
+3. company_cn 与 counterparty_raw 要分开，不要把两个公司塞进 company_raw。
+4. 金额用原文写法（「近27亿元」「3000万美元」「最高3亿美元」），不要换算。
+5. 若 is_event=false，其余字段可为空字符串。`;
 
 function parseJson(s) {
   const t = String(s || '').replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
@@ -55,7 +61,8 @@ async function extractOne(item, cfg, { log = () => {}, retryModel = null } = {})
         model,
         messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: user }],
         temperature: 0,
-        max_tokens: 700
+        max_tokens: 700,
+        enable_thinking: false          // 抽取不需要思维链：省 token，且避免 reasoning 吃掉输出预算
       }),
       signal: AbortSignal.timeout(60000)
     });

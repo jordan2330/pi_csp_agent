@@ -19,6 +19,7 @@ const { extractOne } = require('./lib/extract');
 const events = require('./lib/events');
 
 const WS = path.resolve(__dirname, '..', '..');
+require(path.join(WS, 'scripts', 'lib', 'wecom.js')).loadEnv();   // 复用零依赖 .env 解析（DASHSCOPE_API_KEY）
 const arg = (n, d) => { const i = process.argv.indexOf(n); return i !== -1 && process.argv[i + 1] ? Number(process.argv[i + 1]) : d; };
 const has = (f) => process.argv.includes(f);
 const LIMIT = arg('--limit', 50);
@@ -53,6 +54,8 @@ const log = (...a) => console.log(...a);
       const it = cands[next++];
       try {
         const ev = await extractOne(it, cfg, { log });
+        ev.company_raw = ev.company_cn || '';                 // 行主角 = 中国公司（MNC 只做 counterparty）
+        ev.type = ev.company_cn ? ev.type : 'other';
         ev.date = String(ev.event_date || (it.published || '').slice(0, 10) || '').slice(0, 10);
         if (ev.ok) {
           ok++;
@@ -90,7 +93,7 @@ function renderReport(results, meta) {
       i + 1,
       ev.ok ? '✅' : (ev.review_why === '非事件' ? '·' : '⚠️'),
       `[${item.source}] ${item.title.slice(0, 46).replace(/\|/g, '/')}`,
-      f('type'), f('company_raw'), f('asset_raw'), f('phase_raw'),
+      f('type'), f('company_cn'), f('counterparty_raw'), f('asset_raw'), f('phase_raw'),
       [f('amount_upfront_raw'), f('amount_total_raw')].filter(Boolean).join(' / '),
       f('territory_raw'), f('evidence_quote'), ev.review_why || ''
     ].join(' | ');
@@ -103,8 +106,8 @@ function renderReport(results, meta) {
     '',
     '判定标准：✅=是真事件且引文能回文；⚠️=模型说是事件但引文对不上（疑似幻觉）；·=模型判为非事件',
     '',
-    '| # | 判 | 标题 | 类型 | 公司 | 资产 | 阶段 | 金额 | 授权范围 | 引文 | 说明 |',
-    '|---|---|---|---|---|---|---|---|---|---|---|',
+    '| # | 判 | 标题 | 类型 | 中国公司 | 对方 | 资产 | 阶段 | 金额 | 授权范围 | 引文 | 说明 |',
+    '|---|---|---|---|---|---|---|---|---|---|---|---|',
     ...rows
   ].join('\n');
 }

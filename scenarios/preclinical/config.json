@@ -67,7 +67,7 @@
     "model": "deepseek-v4.1-flash-1017",
     "concurrency": 3,
     "max_chars": 3000,
-    "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    "baseUrl": "https://ws-a0xlypfxmjry2g7l.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
   },
   "limits": {
     "keep_days": 30,
