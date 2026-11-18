@@ -5,8 +5,19 @@ const { htmlToText, stripWechatHeader } = require('./text');
 
 const UA = { 'user-agent': 'pi-csp-agent/1.0 (internal sales-lead research)' };
 
+// 硬编码正则（不用 new RegExp(tag)：避免动态正则带来的 ReDoS 风险）
+const FIELDS = {
+  title: /<title[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/i,
+  link: /<link[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/link>/i,
+  pubDate: /<pubDate[^>]*>([\s\S]*?)<\/pubDate>/i,
+  description: /<description[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/description>/i,
+  'content:encoded': /<content:encoded[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/content:encoded>/i,
+  guid: /<guid[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/guid>/i
+};
 function pick(xml, tag) {
-  const m = xml.match(new RegExp(`<${tag}[^>]*>(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?</${tag}>`, 'i'));
+  const re = FIELDS[tag];
+  if (!re) return '';
+  const m = xml.match(re);
   return m ? m[1].trim() : '';
 }
 
