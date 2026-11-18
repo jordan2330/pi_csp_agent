@@ -24,7 +24,7 @@ This is a Pi Coding Agent project for CSP (Aptar active packaging) sales lead di
   - `scenarios/<name>/SKILL.md` — 场景指令（pipeline 编排）
   - `scenarios/<name>/scenario.json` — 声明式配置（表头列、CSP推荐矩阵、数据时间窗、缓存/报告路径）
   - `scenarios/<name>/enrich.js` — 场景专属 hooks（药物分类、CSP推荐、报告小标题等）
-- `scripts/` — Pipeline 自动化脚本
+- `scripts/` — **nitrosamine 时代的遗留区**：`lib/wecom.js`、`lib/cde-classify.js`、`launch-chrome.sh` 是共享基础设施（三场景在用），其余是主表专属（详见 `scripts/README.md`）。**新场景一律写 `scenarios/<name>/`，不再往 `scripts/` 加东西**；历史文件不搬家（共享模块搬过去会造成反向依赖，生产 cron 也指向这里）
   - `run-pipeline.js` — 主编排器（Phase 2+3：双源搜索 → 快照 → 报告）
   - `launch-chrome.sh` — 启动 Windows 侧专用 profile Chrome 并开放 CDP 端点（本地运行必需）
   - `reset-and-search.sh` — 从零全量重置脚本
