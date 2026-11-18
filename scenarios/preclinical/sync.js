@@ -13,6 +13,7 @@
 
 const path = require('path');
 const WS = path.resolve(__dirname, '..', '..');
+process.env.WECOM_TABLE = 'preclinical';        // cfg 分轴：config/wecom-preclinical[.env].json
 require(path.join(WS, 'scripts', 'lib', 'wecom.js')).loadEnv();
 const sheet = require('./sheet');
 const events = require('./lib/events');
@@ -22,9 +23,9 @@ const arg = (n, d) => { const i = process.argv.indexOf(n); return i !== -1 && pr
 
 (async () => {
   const year = new Date().getFullYear();
-  const db = events.load(year);
-  const rows = Object.values(db.events);
-  console.log(`账本 events-${year}: ${rows.length} 条`);
+  // 跨年不能只读当年：1 月 1 日新账本为空会把子表清空
+  const rows = [...Object.values(events.load(year - 1).events), ...Object.values(events.load(year).events)];
+  console.log(`账本 events-${year - 1}+${year}: ${rows.length} 条`);
   if (has('--init')) await sheet.initTable();
   const r = await sheet.sync(rows, { dryRun: has('--dry-run'), windowDays: arg('--days', 60) });
   console.log(JSON.stringify(r));

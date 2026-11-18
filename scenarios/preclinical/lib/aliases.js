@@ -13,8 +13,13 @@ const path = require('path');
 const WS = path.resolve(__dirname, '..', '..', '..');
 const FILE = path.join(WS, 'config', 'preclinical-asset-aliases.json');
 
-const load = () => { try { return JSON.parse(fs.readFileSync(FILE, 'utf8')); } catch { return { groups: [] }; } };
-const save = (db) => { fs.mkdirSync(path.dirname(FILE), { recursive: true }); fs.writeFileSync(FILE, JSON.stringify(db, null, 1)); };
+let CACHE = null;                                   // findSame 里会被调用 N×M 次，缓存一次
+const load = () => {
+  if (CACHE) return CACHE;
+  try { CACHE = JSON.parse(fs.readFileSync(FILE, 'utf8')); } catch { CACHE = { groups: [] }; }
+  return CACHE;
+};
+const save = (db) => { fs.mkdirSync(path.dirname(FILE), { recursive: true }); fs.writeFileSync(FILE, JSON.stringify(db, null, 1)); CACHE = db; };
 
 // 靶点名（IL-17 / IL-23 / GLP-1）不是资产代号：至少一侧要有 ≥3 位数字才算
 const isAsset = (c) => /\d{3,}/.test(c);

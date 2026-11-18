@@ -56,7 +56,7 @@ function quoteOk(quote, text) {
   return total > 0 && hit / total >= 0.7;
 }
 
-async function extractOne(item, cfg, { log = () => {}, retryModel = null } = {}) {
+async function extractOne(item, cfg) {
   const key = process.env.DASHSCOPE_API_KEY;
   if (!key) throw new Error('缺少 DASHSCOPE_API_KEY（写进 .env 或 export）');
   const body = String(item.text || '').slice(0, cfg.llm?.max_chars || 3000) || `（只有标题，无正文）${item.title}`;
@@ -80,14 +80,10 @@ async function extractOne(item, cfg, { log = () => {}, retryModel = null } = {})
     return data.choices?.[0]?.message?.content || '';
   };
 
-  let raw;
-  try { raw = await call(cfg.llm.model); } catch (e) {
-    if (!retryModel || retryModel === cfg.llm.model) throw e;
-    log(`    重试(${retryModel}): ${e.message.slice(0, 50)}`);
-    raw = await call(retryModel);
-  }
+  const raw = await call(cfg.llm.model);
   const ev = parseJson(raw);
-  const ok = ev.is_event && quoteOk(ev.evidence_quote, item.text);
+  // 校验对象必须与喂给模型的一致（PDF 抓不到正文时喂的是标题，就要对标题校验）
+  const ok = ev.is_event && quoteOk(ev.evidence_quote, body);
   return {
     ...ev,
     ok: !!ok,

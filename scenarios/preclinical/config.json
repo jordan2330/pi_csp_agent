@@ -57,14 +57,6 @@
     "候选化合物",
     "管线"
   ],
-  "event_types": [
-    "license_out",
-    "license_in",
-    "financing",
-    "milestone",
-    "partnership",
-    "other"
-  ],
   "llm": {
     "model": "deepseek-v4.1-flash-1017",
     "concurrency": 3,
@@ -72,7 +64,6 @@
     "baseUrl": "https://ws-a0xlypfxmjry2g7l.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
   },
   "limits": {
-    "keep_days": 30,
     "max_per_feed": 20
   },
   "cninfo_queries": [

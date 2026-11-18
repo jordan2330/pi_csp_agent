@@ -8,13 +8,11 @@
  * 目标：config/wecom-preclinical.json（prod）/ config/wecom-preclinical.dev.json（dev）
  */
 
-const fs = require('fs');
 const path = require('path');
 const W = require(path.join(__dirname, '..', '..', 'scripts', 'lib', 'wecom.js'));
 
 const WS = path.resolve(__dirname, '..', '..');
 const log = (...a) => console.log(...a);
-const CFG_BASE = 'wecom-preclinical';
 
 const sel = (text, style) => ({ text, style });
 // 单选/多选写入必须用**字段真实选项 id**（add_fields 建的选项 id 由服务端生成，不是文本）
@@ -23,8 +21,9 @@ function loadOpts(fields) {
   OPT = new Map((fields || []).filter(f => f.property_single_select).map(f => [f.field_title, f.property_single_select.options || []]));
 }
 const S = (title, text) => {
+  if (!OPT.size) throw new Error('单选选项未加载：先调 loadOpts(getFields(...))（否则会静默写空）');
   const opt = (OPT.get(title) || []).find(o => o.text === text);
-  return opt ? [{ id: opt.id, text: opt.text }] : [];
+  return opt ? [{ id: opt.id, text: opt.text }] : [];     // 选项里没有该值 → 留空（如阶段未知）
 };
 
 const SCHEMA = [
@@ -48,11 +47,19 @@ const SCHEMA = [
 const FB = ['是否已有客户', '跟进状态', '负责人', '备注'];
 const DATA = SCHEMA.map(f => f.field_title).filter(t => !FB.includes(t));
 const TYPE_MAP = { license_out: '授权出海', license_in: '引进', financing: '融资', milestone: '里程碑', partnership: '合作', other: '合作' };
-const PHASE_MAP = [[/临床前|PCC/i, '临床前'], [/IND|获批临床/i, 'IND'], [/I\/II|I期|一期/i, 'I期'], [/II期|二期/i, 'II期'], [/III期|三期/i, 'III期'], [/NDA|上市|获批/i, 'NDA/上市']];
+// 顺序敏感："III期".includes("I期") 为真 → 必须先匹配 III，再 II，最后 I；IND 要在 NDA 之前（"获批临床"含"获批"）
+const PHASE_MAP = [
+  [/临床前|PCC/i, '临床前'],
+  [/IND|获批临床/i, 'IND'],
+  [/III\s*期|Ⅲ|三期/, 'III期'],
+  [/II\s*期|Ⅱ|二期/, 'II期'],
+  [/I\s*期|Ⅰ|一期/, 'I期'],
+  [/NDA|BLA|上市申请|获批上市/i, 'NDA/上市']
+];
 
-const cfgFile = () => path.join(WS, 'config', `${CFG_BASE}${W.envOf() === 'prod' ? '' : '.' + W.envOf()}.json`);
-function readCfg() { try { return JSON.parse(fs.readFileSync(cfgFile(), 'utf8')); } catch { return {}; } }
-function writeCfg(c) { fs.writeFileSync(cfgFile(), JSON.stringify({ ...c, env: W.envOf(), host: require('os').hostname(), updated_at: new Date().toISOString() }, null, 1)); }
+// 配置与护栏复用 wecom.js（WECOM_TABLE=preclinical 时 cfgFile() 恰好解析到 config/wecom-preclinical[.env].json）
+const cfgFile = () => W.cfgFile();
+const readCfg = () => W.readCfg();
 
 function targetText(ev) {
   const a = ev.amount_upfront_raw, b = ev.amount_total_raw;
@@ -109,9 +116,8 @@ async function initTable() {
 }
 
 async function sync(rows, { dryRun = false, windowDays = 60 } = {}) {
-  const cfg = readCfg();
-  if (!cfg.docid || !cfg.sheet_id) throw new Error('先跑 init');
-  if (!cfg.env || !cfg.host) writeCfg(cfg);
+  const cfg = W.guardWrite('sync-preclinical');       // 跨环境/跨机写入直接拒绝
+  if (!cfg.sheet_id) throw new Error('先跑 sync.js --init');
   log(`目标子表: env=${W.envOf()} host=${require('os').hostname()} docid=${cfg.docid.slice(0, 12)}… sheet=${cfg.sheet_id}`);
 
   const since = new Date(Date.now() - windowDays * 864e5).toISOString().slice(0, 10);
@@ -137,6 +143,12 @@ async function sync(rows, { dryRun = false, windowDays = 60 } = {}) {
   const hasFb = (rec) => !!(W.plain(rec.values?.['跟进状态']) || W.plain(rec.values?.['备注']) || (rec.values?.['负责人'] || []).length || W.plain(rec.values?.['是否已有客户']));
   const toDelete = [...existing.entries()].filter(([k, rec]) => !keepKeys.has(k) && !hasFb(rec)).map(([, rec]) => rec.record_id);
 
+  // 缩表护栏：保留行腰斩 → 多半是账本缺失/跨年/损坏，拒绝写（跨年时 sync.js 已合并两年账本）
+  const keepCount = keep.length + [...existing.keys()].filter(k => !keepKeys.has(k) && hasFb(existing.get(k))).length;
+  if (records.length && keepCount < records.length * 0.5 && process.env.WECOM_ALLOW_SHRINK !== '1') {
+    throw new Error(`拒绝同步：本轮保留 ${keepCount} 行，不足表内 ${records.length} 行的一半（账本缺失/跨年？）。确属口径调整则 WECOM_ALLOW_SHRINK=1 重跑`);
+  }
+
   if (dryRun) { log(`[dry-run] 新增 ${toAdd.length} / 更新 ${toUpdate.length} / 移出 ${toDelete.length}（表内 ${records.length}）`); return { added: toAdd.length, updated: toUpdate.length, deleted: toDelete.length }; }
   if (toAdd.length) await W.sheet.addRecords(cfg.docid, cfg.sheet_id, toAdd);
   if (toUpdate.length) await W.sheet.updateRecords(cfg.docid, cfg.sheet_id, toUpdate);
@@ -145,4 +157,4 @@ async function sync(rows, { dryRun = false, windowDays = 60 } = {}) {
   return { added: toAdd.length, updated: toUpdate.length, deleted: toDelete.length, total: records.length - toDelete.length + toAdd.length };
 }
 
-module.exports = { SCHEMA, FB, DATA, initTable, sync, rowValues, scalarOf, readCfg, cfgFile };
+module.exports = { SCHEMA, FB, DATA, initTable, sync, rowValues, scalarOf, loadOpts, readCfg, cfgFile };

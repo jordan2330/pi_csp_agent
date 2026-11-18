@@ -70,7 +70,12 @@ const log = (...a) => console.log(...a);
         const ev = await extractOne(it, cfg, { log });
         ev.company_raw = ev.company_cn || '';                 // 行主角 = 中国公司（MNC 只做 counterparty）
         ev.type = ev.company_cn ? ev.type : 'other';
-        ev.date = String(ev.event_date || (it.published || '').slice(0, 10) || '').slice(0, 10);
+        // 日期：LLM 常给「2023-12」「2026年11月」这类非标准值 → 回退文章日期，仍不合法则不入库
+        const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+        const cand = String(ev.event_date || '').match(/\d{4}-\d{2}-\d{2}/)?.[0];
+        const pub = String(it.published || '').slice(0, 10);
+        ev.date = DATE_RE.test(cand || '') ? cand : (DATE_RE.test(pub) ? pub : '');
+        if (ev.ok && !ev.date) { ev.ok = false; ev.needs_review = true; ev.review_why = '无有效日期'; }
         if (ev.ok) {
           ok++;
           if (!DRY) {

@@ -21,11 +21,14 @@ const norm = (s) => String(s || '').replace(/\s+/g, '').toLowerCase();
 /** 同公司（或同资产）+ 同类型 + ±3 天 → 视为同一笔（转载/次日跟进稿自然折叠） */
 function findSame(events, ev, days = 3) {
   const d0 = dayNum(ev.date);
+  if (!Number.isFinite(d0)) return undefined;              // 无有效日期一律不合并
   return Object.entries(events).find(([, x]) => {
     if (x.type !== ev.type) return false;
-    if (Math.abs(dayNum(x.date) - d0) > days) return false;
-    if (ev.asset_raw && x.asset_raw) return norm(x.asset_raw) === norm(ev.asset_raw) || shareCode(x.asset_raw, ev.asset_raw);
-    return norm(x.company_raw) === norm(ev.company_raw);
+    const d1 = dayNum(x.date);
+    if (!Number.isFinite(d1) || Math.abs(d1 - d0) > days) return false;
+    // 宁可多两行不可错并：只要任一侧没抽到资产，就不做合并（同公司一周两笔不同交易会被错并）
+    if (!ev.asset_raw || !x.asset_raw) return false;
+    return norm(x.asset_raw) === norm(ev.asset_raw) || shareCode(x.asset_raw, ev.asset_raw);
   });
 }
 
