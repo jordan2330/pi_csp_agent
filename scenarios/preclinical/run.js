@@ -15,6 +15,7 @@ const path = require('path');
 const cfg = require('./config.json');
 const { fetchWechat, fetchGoogleNews } = require('./lib/rss');
 const { fetchCninfo } = require('./lib/cninfo');
+const { pdfText } = require('./lib/pdf');
 const { candidates } = require('./lib/filter');
 const { extractOne } = require('./lib/extract');
 const events = require('./lib/events');
@@ -29,6 +30,7 @@ const MIN_SCORE = arg('--min-score', 4);
 const DRY = has('--dry');
 const NO_LLM = has('--no-llm');
 const REPORT = (() => { const i = process.argv.indexOf('--report'); return i !== -1 ? process.argv[i + 1] : null; })();
+const ONLY = (() => { const i = process.argv.indexOf('--source'); return i !== -1 ? process.argv[i + 1] : null; })();
 const log = (...a) => console.log(...a);
 
 (async () => {
@@ -42,7 +44,8 @@ const log = (...a) => console.log(...a);
   const fresh = items.filter(it => !it.published || Date.parse(it.published) >= since);
   log(`\n共 ${items.length} 条，${SINCE_H}h 内 ${fresh.length} 条`);
 
-  const cands = candidates(fresh, cfg.keywords, { minScore: MIN_SCORE }).slice(0, LIMIT);
+  const pool = ONLY ? fresh.filter(it => it.source.includes(ONLY)) : fresh;
+  const cands = candidates(pool, cfg.keywords, { minScore: MIN_SCORE }).slice(0, LIMIT);
   log(`关键词过闸 ${cands.length} 条（阈值 ${MIN_SCORE}，上限 ${LIMIT}）`);
   if (NO_LLM) {
     for (const c of cands) log(`  ${String(c.score).padStart(3)} [${c.source}] ${c.title.slice(0, 50)}  命中:${c.hits.slice(0, 4).join('/')}`);
@@ -58,6 +61,10 @@ const log = (...a) => console.log(...a);
     while (next < cands.length) {
       const it = cands[next++];
       try {
+        // cninfo 只有标题 + PDF 直链 → 抽正文（金额/授权范围只在 PDF 里）
+        if (it.titleOnly && /\.PDF$/i.test(it.url || '') && it.text.length < 200) {
+          try { it.text = await pdfText(it.url, { maxPages: 6 }); } catch (e) { log(`    PDF 失败(${e.message.slice(0, 30)})，退回标题`); }
+        }
         const ev = await extractOne(it, cfg, { log });
         ev.company_raw = ev.company_cn || '';                 // 行主角 = 中国公司（MNC 只做 counterparty）
         ev.type = ev.company_cn ? ev.type : 'other';

@@ -6,7 +6,6 @@
  * 对不上 → 整条标 needs_review，绝不静默入库。
  */
 
-const { normText } = require('./filter');
 
 const SYSTEM = `你是医药行业信息抽取器。只抽取文中明确写出的信息，不推断、不补全。
 只输出一个 JSON 对象，不要 markdown 代码块，不要解释。
@@ -32,7 +31,9 @@ const SYSTEM = `你是医药行业信息抽取器。只抽取文中明确写出�
 2. **综述/盘点/周报/会议报道/书评/评论**（标题含「一周药闻」「盘点」「汇总」「大会」「解读」「好书推荐」「为什么」「怎么看」等）一律 is_event=false。
 3. company_cn 与 counterparty_raw 要分开，不要把两个公司塞进 company_raw。
 4. 金额用原文写法（「近27亿元」「3000万美元」「最高3亿美元」），不要换算。
-5. 若 is_event=false，其余字段可为空字符串。`;
+5. 临床前数据读出、会议报告（如 AACR/ObesityWeek 公布临床前数据）算 milestone，属于早期信号。
+6. evidence_quote 必须与【正文】**用同样的汉字**（繁体正文就引繁体），不要改写或翻译。
+7. 若 is_event=false，其余字段可为空字符串。`;
 
 function parseJson(s) {
   const t = String(s || '').replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
@@ -41,10 +42,18 @@ function parseJson(s) {
   return JSON.parse(t.slice(i, j + 1));
 }
 
-/** 引文回文校验：忽略空白差异，quote 必须是正文的子串 */
+const hardNorm = (s) => String(s || '').replace(/[^\u4e00-\u9fffA-Za-z0-9]/g, '');   // 去标点/空白/全半角
+/** 引文回文校验：严格子串 → 退化为 4-gram 重叠率（PDF 提取/繁简差异常导致严格失败） */
 function quoteOk(quote, text) {
-  const q = normText(quote);
-  return q.length >= 8 && normText(text).includes(q);
+  const q = hardNorm(quote);
+  if (q.length < 8) return false;
+  const t = hardNorm(text);
+  if (t.includes(q)) return true;
+  const grams = new Set();
+  for (let i = 0; i + 4 <= t.length; i++) grams.add(t.slice(i, i + 4));
+  let hit = 0, total = 0;
+  for (let i = 0; i + 4 <= q.length; i++) { total++; if (grams.has(q.slice(i, i + 4))) hit++; }
+  return total > 0 && hit / total >= 0.7;
 }
 
 async function extractOne(item, cfg, { log = () => {}, retryModel = null } = {}) {
