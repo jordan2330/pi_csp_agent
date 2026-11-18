@@ -14,7 +14,8 @@ const save = (y, db) => { fs.mkdirSync(DIR, { recursive: true }); fs.writeFileSy
 const dayNum = (d) => Math.floor(Date.parse(`${d}T00:00:00Z`) / 864e5);
 // 资产代号集合：OLN324 / IBI324 / HSK47388 / RC298（不同稿子常给不同代号，如「IBI324（OLN324）」）
 const codesOf = (s) => new Set((String(s || '').toUpperCase().match(/[A-Z]{2,6}-?\d{2,6}[A-Z0-9]{0,4}/g) || []));
-const shareCode = (a, b) => { const x = codesOf(a), y = codesOf(b); return [...x].some(c => y.has(c)); };
+const { same: sameAsset } = require('./aliases');
+const shareCode = (a, b) => { const x = codesOf(a), y = codesOf(b); return [...x].some(c => [...y].some(d => sameAsset(c, d))); };
 const norm = (s) => String(s || '').replace(/\s+/g, '').toLowerCase();
 
 /** 同公司（或同资产）+ 同类型 + ±3 天 → 视为同一笔（转载/次日跟进稿自然折叠） */

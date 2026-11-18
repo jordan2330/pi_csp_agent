@@ -19,6 +19,7 @@ const { pdfText } = require('./lib/pdf');
 const { candidates } = require('./lib/filter');
 const { extractOne } = require('./lib/extract');
 const events = require('./lib/events');
+const aliases = require('./lib/aliases');
 
 const WS = path.resolve(__dirname, '..', '..');
 require(path.join(WS, 'scripts', 'lib', 'wecom.js')).loadEnv();   // 复用零依赖 .env 解析（DASHSCOPE_API_KEY）
@@ -65,6 +66,7 @@ const log = (...a) => console.log(...a);
         if (it.titleOnly && /\.PDF$/i.test(it.url || '') && it.text.length < 200) {
           try { it.text = await pdfText(it.url, { maxPages: 6 }); } catch (e) { log(`    PDF 失败(${e.message.slice(0, 30)})，退回标题`); }
         }
+        if (it.text) aliases.learn(`${it.title} ${it.text}`);      // 学「IBI324（OLN324）」这类改名配对
         const ev = await extractOne(it, cfg, { log });
         ev.company_raw = ev.company_cn || '';                 // 行主角 = 中国公司（MNC 只做 counterparty）
         ev.type = ev.company_cn ? ev.type : 'other';
