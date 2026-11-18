@@ -247,14 +247,7 @@ node scripts/run-pipeline.js nitrosamine
 
 ## 定时任务
 
-**三条 cron 的完整写法只在 `docs/cron.md` 维护**（含 PATH、flock 互斥、上线前四步验证、常见故障）。
-
-```cron
-# 07:40 主表（用 Chrome，与临床阶段管线共用一把锁 → 必须错开）
-40 7 * * *  cd $HOME/agents/pi_csp_agent && flock -n /tmp/csp-chrome.lock node scripts/run-pipeline.js nitrosamine >> output/cron-main.log 2>&1
-```
-
-> 长任务（全量 3-4 小时）建议用 `systemd-run --user --unit=csp-scan ...` 托管，并先执行 `loginctl enable-linger $USER`，避免会话结束后被回收（详见 `scenarios/nitrosamine/SKILL.md`）。
+见 **`docs/cron.md`**（三条 cron 的唯一出处：PATH、Chrome 预热、`flock` 互斥、上线前四步验证、故障对照表）。
 
 ## 管线场景（CSP管线商机）
 
@@ -287,56 +280,8 @@ cp output/history/pipeline-cde.json output/history/pipeline-cde.bak-$(date +%F).
 
 ## 扩展功能
 
-### 新增业务场景
-
-例如加一个「益生菌包装」场景：
-
-```bash
-mkdir -p scenarios/probiotics/references
-```
-
-创建 `scenarios/probiotics/SKILL.md`（参考 `scenarios/nitrosamine/SKILL.md` 的结构）：
-- frontmatter：`name: probiotics` + `description`
-- 三阶段 pipeline 指令：数据采集 → 搜索匹配 → 报告生成
-- 中文编写
-
-创建 `scenarios/probiotics/references/csp-recommendations.md`（CSP 产品推荐规则）
-
-然后直接用：
-```bash
-/lead-scan probiotics
-```
-
-**不需要修改任何其他文件。** `.pi/settings.json` 已配置 `scenarios/` 自动发现。
-
-### 增强浏览器能力
-
-编辑 `skills/browser_executor/scripts/browser.js`，在 switch 中加新的 action：
-
-```javascript
-case 'scroll':
-  await page.evaluate((sel) => {
-    document.querySelector(sel)?.scrollIntoView({ behavior: 'smooth' });
-  }, step.selector);
-  break;
-```
-
-同时在 `skills/browser_executor/SKILL.md` 的 Action 表中更新说明。所有场景共享更新。
-
-### 新增 Prompt 命令
-
-在 `prompts/` 下创建 `.md` 文件，例如 `prompts/new-leads.md`：
-
-```markdown
----
-description: 只查看上次运行以来的新增商机
-argument-hint: "<scenario>"
----
-读取 output/runs/ 目录下最近两次快照，对比 $1 场景的新增项，
-只输出新增商机列表，不重新爬取数据。
-```
-
-用法：`/new-leads nitrosamine`
+加新场景：建 `scenarios/<name>/`（`SKILL.md` + `scenario.json` + `enrich.js`），照抄 `scenarios/pipeline/` 的结构。
+**不要往 `scripts/` 加东西**（那是 nitrosamine 遗留区，见 `scripts/README.md`）。
 
 ## 已知限制
 
@@ -351,121 +296,23 @@ argument-hint: "<scenario>"
 
 ## 故障排除
 
-### 连不上 Chrome / CDP 端点
-
-1. 检查端点：
-   ```bash
-   curl -s http://127.0.0.1:9223/json/version | head -3
-   # 应返回 {"Browser": "Chrome/15x...", ...}
-   ```
-2. 无输出 → 启动 Chrome：`bash scripts/launch-chrome.sh`（自动找 Chrome 路径、启动、等待端点就绪）
-3. 仍失败：
-   - 确认 `~/.wslconfig` 里有 `networkingMode=mirrored`，且重启过 WSL
-   - 确认该专用 profile 没有已存在的 Chrome 窗口在运行（同 profile 会复用进程，调试端口失效）
-4. 指向自定义端点：`export BROWSER_ENDPOINT=http://127.0.0.1:9223`
-
-### Pi TUI 中 `/lead-scan` 命令不存在
-
-确认 `.pi/settings.json` 配置正确：
-```bash
-cat .pi/settings.json
-# 应包含 "prompts": ["prompts/"]
-```
-
-### scripts/ 目录说明
-
-`scripts/` 目录包含运维脚本，已纳入版本控制：
-- `run-pipeline.js` — **主入口**（Agent 自动调用）：场景感知的瘦编排器，串联 CT.gov→CDT→CDE分类富化→快照→报告
-- `launch-chrome.sh` — 启动 Windows 侧真实 Chrome（专用 profile + CDP 端口 9223），pipeline 会在端点不可用时自动调用
-- `reset-and-search.sh` — 从零全量重置（清缓存 + 双源重扫 + 报告），用法 `bash scripts/reset-and-search.sh nitrosamine`
-- `lib/` — 通用层（跨场景复用）：
-  - `sources.js` — CT.gov REST API 采集 + CDT 浏览器采集
-  - `enrichment.js` — 剂型检测（中英文）、产品名抽取
-  - `snapshot.js` — 运行快照 + 增量检测
-  - `report.js` — 通用报告渲染器（由场景的 `scenario.json` + `enrich.js` 驱动）
-
-### 企微 API 报 `60020 not allow to access from your ip`
-
-出口 IP 不在企业可信IP白名单（家宽重拨/换网络后常见，**属正常现象**）：
-```bash
-node scripts/wecom-sync.js checkip   # 报错信息里直接给出该加的 IP
-# → 管理后台：应用管理 → 应用 → 企业可信IP → 加上（分号分隔可多填，上限 120）
-```
-
-### 企微同步失败但 pipeline 未中断
-
-Phase 3 同步失败只影响交付层（数据在本地快照里不丢）；修复凭证/白名单后手动补同步：
-```bash
-node scripts/wecom-sync.js sync      # 用最新快照重同步
-```
-
-### browser.js 报 `MODULE_NOT_FOUND: playwright`
-
-依赖未安装。执行：
-```bash
-cd skills/browser_executor/scripts
-PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm i
-```
-
-### chinadrugtrials 搜索结果为空
-
-1. 确认 Chrome CDP 正常（见上「连不上 Chrome / CDP 端点」）
-2. 用截图模式检查页面是否正常加载：
-   ```bash
-   node skills/browser_executor/scripts/browser.js screenshot https://www.chinadrugtrials.org.cn/clinicaltrials.searchlist.dhtml /tmp/test.png
-   ```
-3. 截图为空白/质询页 → 浏览器指纹或 IP 被风控，等一段时间或降低频率后重试
-4. 页面正常但搜索无结果 → 确认搜索词是中文名（`name_cn`），英文名在 CDT 无效
-5. 单独验证单个 API 的采集：
-   ```bash
-   node skills/browser_executor/scripts/cdt-search.js "阿替洛尔" /tmp/test.json --max-details 5
-   ```
+| 症状 | 先看哪 |
+|---|---|
+| 连不上 Chrome / CDP | `curl -s http://127.0.0.1:9223/json/version`，不行就 `bash scripts/launch-chrome.sh` |
+| 抓取为空 / 数据不对 | 对应场景 `SKILL.md` 的踩坑节（CDE 翻页、CDT 瑞数、CT.gov 期次误匹配） |
+| 定时任务没跑 | `docs/cron.md` 故障表（`PATH` 找不到 node、`flock` 跳过、`.env` 环境） |
+| 表写不进去 | `node scripts/wecom-sync.js status`；跨环境/跨机会被 `guardWrite` 拒绝 |
 
 ## 项目结构
 
 ```
-pi-csp-agent/
-├── AGENTS.md                          # Pi 项目指令（Agent 启动时自动加载）
-├── .pi/settings.json                  # Pi 配置：skills/prompts 路径
-├── config/
-│   ├── models.json                    # Qwen 模型配置（复制到 ~/.pi/agent/models.json）
-│   ├── api_translations.json          # API 中英对照表（104对，来源USP参考文件）
-│   ├── cdt-throttle.json              # CDT 请求节奏控制
-│   ├── cde-classify.json              # CDE 官方受理品种信息采集配置（分类富化主源）
-│   ├── fda_nitrosamines.json          # FDA 数据缓存（双源搜索状态机，自动生成）
-│   └── search-config.json             # 搜索模式配置（full/incremental）
-├── skills/browser_executor/
-│   ├── SKILL.md                       # 浏览器工具说明（连接模式/action/安全约束）
-│   └── scripts/
-│       ├── browser-connect.js         # 连接解析：真浏览器 CDP 优先，自动拉起 Chrome
-│       ├── browser.js                 # 多步脚本执行器（script/screenshot 模式）
-│       ├── cdt-search-lib.js          # CDT 搜索核心库（pipeline 直接 require）
-│       └── cdt-search.js              # CDT 搜索 CLI 包装（调试用）
-├── scenarios/nitrosamine/
-│   ├── SKILL.md                       # 亚硝胺场景 pipeline（编排器，调用 scripts/ 执行）
-│   ├── scenario.json                  # 场景声明式配置（标题/表头列/CSP矩阵/缓存路径）
-│   ├── enrich.js                      # 场景专属 hooks（药物分类/CSP推荐/报告小标题）
-│   └── references/csp-recommendations.md  # CSP 产品推荐规则
-├── scripts/                           # 运维脚本（Agent 自动调用，已纳入版本控制）
-│   ├── run-pipeline.js                # ★ 主入口：场景感知瘦编排器（CT.gov + CDT + 报告）
-│   ├── launch-chrome.sh               # 启动 Windows 侧真实 Chrome（CDP 9223）
-│   ├── reset-and-search.sh            # 从零全量重置脚本
-│   ├── wecom-sync.js                  # 智能表格运维 CLI（init/status/feedback/checkip）
-│   └── lib/                           # 通用层（跨场景复用）
-│       ├── sources.js                 # CT.gov REST + CDT 浏览器采集
-│       ├── cde-classify.js            # CDE 受理品种信息 → 注册分类证据（官方一手，免费）
-│       ├── enrichment.js              # 剂型检测 / 产品名抽取
-│       ├── snapshot.js                # 快照 + 增量检测
-│       ├── report.js                  # 数据模型（buildLeadModel + flattenTrials）
-│       ├── wecom.js                   # 企微 API 客户端（智能表格 + 群机器人）
-│       └── wecom-sheet.js             # 智能表格同步器（唯一交付层，37 字段）
-├── prompts/lead-scan.md               # 入口命令 /lead-scan <scenario>
-└── output/
-    ├── history/                       # 账本（ledger/feedback/runs，gitignore 内）
-    └── runs/                          # 运行快照（增量对比用）
+scenarios/<name>/    场景专属（SKILL + 采集/评分/交付 + enrich hooks）
+scripts/             nitrosamine 遗留区（lib/wecom.js 等是共享基建，见 scripts/README.md）
+docs/cron.md         调度（唯一出处）
+config/ output/      运行时配置与派生数据（均在 gitignore）
 ```
 
-> **本地运行说明**：不再使用 Docker。采集依赖 Windows 侧真实 Chrome（专用 profile，CDP 端口 9223），WSL 需 mirrored 网络模式；端点可用 `BROWSER_ENDPOINT` 覆盖。
+逐文件职责见 `AGENTS.md` 的 Project Structure。
 
 ## License
 
