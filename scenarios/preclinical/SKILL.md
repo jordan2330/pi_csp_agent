@@ -76,6 +76,21 @@ node scenarios/preclinical/digest.js --days 14 --send   # 强制推送（含 dev
 ⑦ 投影        sheet.js：窗口 60 天 ∪ 有反馈；缩表护栏（腰斩拒绝）
 ```
 
+### 历史补录（`import.js`，不走抓取链）
+
+公众号 RSS 每号只给最近 20 条，**10 个月以前的历史拿不到正文**；网络检索能覆盖，于是留了一条补录通道：
+
+```bash
+node scenarios/preclinical/import.js --file /tmp/research-bd.json [--file b.json] [--dry-run]
+```
+
+- 产出方可以是 subagent / 人工检索，格式同抽取结果的一个子集（见脚本头注释）
+- **同一套账本、同一套 EVT 键与去重**：表里与采集行无差别，靠 `source_type: research` 溯源
+- **引句必须回文**：脚本抓 URL 原文校验（复用 `extract.quoteOk`），对不上即拒绝，不入库
+- 金额只做"原文 → 百万美元"换算（固定汇率 7.2，仅供排序），`territory_scope`/`china_rights`/`therapeutic_area` 一律 unknown（不推断）
+- 拒绝原因与「疑似跨月重复」写到 `output/preclinical/import-review-<日期>.md`
+- **定位是补历史**，不替代周频采集：漏报率比自动采集高（很多交易只在公众号发）
+
 ### 抽取的硬规则（写进 prompt，直接决定精确率）
 
 1. **必须是中国公司做交易**（授出/引进/融资/里程碑/合作）。MNC 在中国的采购 → 非事件；MNC 只能当"对方"。

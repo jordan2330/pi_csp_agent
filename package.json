@@ -4,7 +4,7 @@
   "private": true,
   "description": "CSP 商机发掘 pipeline（WSL 本地运行 + Windows 真实 Chrome 采集 + 企微智能表格交付）",
   "scripts": {
-    "test": "node --test \"scenarios/pipeline/test/*.test.js\""
+    "test": "node --test \"scenarios/pipeline/test/*.test.js\" \"scenarios/preclinical/test/*.test.js\""
   },
   "dependencies": {}
 }
