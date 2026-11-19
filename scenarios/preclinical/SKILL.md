@@ -21,7 +21,7 @@
 node scenarios/preclinical/run.js --since-hours 192            # 每周：抓取 → 过滤 → 抽取 → 入账本（192h=8天，留跨周缓冲）
 node scenarios/preclinical/run.js --limit 50 --dry --report output/preclinical/review.md   # 只看不写，出人工复核表
 node scenarios/preclinical/run.js --no-llm                     # 只验证数据源（不需要 Key）
-node scenarios/preclinical/sync.js                             # 账本 → 子表（窗口 60 天 ∪ 有反馈）
+node scenarios/preclinical/sync.js                             # 账本 → 子表（窗口 400 天 ∪ 有反馈）
 node scenarios/preclinical/sync.js --dry-run
 
 # 换姿势
@@ -73,7 +73,7 @@ node scenarios/preclinical/digest.js --days 14 --send   # 强制推送（含 dev
               输出 is_event/type/company_cn/counterparty/asset/剂型/阶段/金额/授权范围/引文
 ⑤ 校验        引文必须能回文（严格子串 → 4-gram 70% 兜底）；对不上 → needs_review，不入库
 ⑥ 入库        lib/events.js：键 EVT|公司|资产|类型|日期；±3 天 + 代号交集合并
-⑦ 投影        sheet.js：窗口 60 天 ∪ 有反馈；缩表护栏（腰斩拒绝）
+⑦ 投影        sheet.js：窗口 400 天（一年）∪ 有反馈；缩表护栏（腰斩拒绝）
 ```
 
 ### 历史补录（`import.js`，不走抓取链）

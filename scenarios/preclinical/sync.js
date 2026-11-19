@@ -6,7 +6,7 @@
  *   node scenarios/preclinical/sync.js --bootstrap # 首次（生产）：在「CSP管线商机」文档下建子表并写配置
  *   node scenarios/preclinical/sync.js --init      # 首次：把默认列改成 SCHEMA（22 列）
  *   node scenarios/preclinical/sync.js --dry-run   # 只看会写多少行
- *   node scenarios/preclinical/sync.js             # 同步最近 60 天事件
+ *   node scenarios/preclinical/sync.js             # 同步账本近 400 天（一年，含已补录历史）
  *   node scenarios/preclinical/sync.js --days 120
  *
  * 表 = 窗口内事件 ∪ 有销售反馈的行；数据列 pipeline 独占写，后 4 列销售手填。
@@ -49,6 +49,6 @@ const arg = (n, d) => { const i = process.argv.indexOf(n); return i !== -1 && pr
     }
   }
   if (has('--init')) await sheet.initTable();
-  const r = await sheet.sync(rows, { dryRun: has('--dry-run'), windowDays: arg('--days', 60) });
+  const r = await sheet.sync(rows, { dryRun: has('--dry-run'), windowDays: arg('--days', 400) });
   console.log(JSON.stringify(r));
 })().catch(e => { console.error('❌', e.message); process.exit(1); });

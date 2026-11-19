@@ -154,7 +154,7 @@ async function initTable() {
   return readCfg();
 }
 
-async function sync(rows, { dryRun = false, windowDays = 60 } = {}) {
+async function sync(rows, { dryRun = false, windowDays = 400 } = {}) {
   const cfg = W.guardWrite('sync-preclinical');       // 跨环境/跨机写入直接拒绝
   if (!cfg.sheet_id) throw new Error('先跑 sync.js --init');
   log(`目标子表: env=${W.envOf()} host=${require('os').hostname()} docid=${cfg.docid.slice(0, 12)}… sheet=${cfg.sheet_id}`);
