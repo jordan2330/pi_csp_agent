@@ -6,12 +6,10 @@ This is a Pi Coding Agent project for CSP (Aptar active packaging) sales lead di
 
 ## LLM Configuration
 
-- Provider: Aliyun DashScope (百炼) via OpenAI-compatible API
-- Endpoint: `https://dashscope.aliyuncs.com/compatible-mode/v1`
-- Models: `qwen3.7-max` / `deepseek-v4-pro` / `glm-5.2` / `kimi-k2.6` for complex reasoning, `qwen3.7-plus` / `deepseek-v4-flash` for routine tasks
-- Config: 仓库内 `config/models.json` 是版本控制中的源，本地运行时复制到 `~/.pi/agent/models.json`（WSL: `/home/<user>/.pi/agent/models.json`）
-- API key: `DASHSCOPE_API_KEY` environment variable
-- All models use `thinkingFormat: "qwen"` (Aliyun unified endpoint)
+- **场景脚本用的 LLM 只认一处**：`scenarios/preclinical/config.json` 的 `llm.{model,baseUrl}`（当前 `deepseek-v4.1-flash-1017`，阿里云 MaaS 按量付费端点），Key 走环境变量 `DASHSCOPE_API_KEY`
+- pi 自身的模型配置在 `~/.pi/agent/` （token plan），**不在仓库内**；仓库不再维护 `config/models.json`（2026-11 删除：无代码读取，且与 pi 实际所用模型脱节）
+- 脚本内禁止硬编码模型名或批量模型清单；要换模型只改 `scenarios/preclinical/config.json`
+- 调度 subagent 时**不要指定 `qwen3.7-max`**（用户明确不用）；留空用默认模型
 
 ## Project Structure
 
@@ -40,7 +38,6 @@ This is a Pi Coding Agent project for CSP (Aptar active packaging) sales lead di
   - `lib/nmpa-search.js` — 博查搜索富化（**已停用**，二手搜索不参与分类；模块与缓存保留备查）
 - `prompts/` — Pi prompt templates (entry points like `/lead-scan`)
 - `config/` — Cached data and model configuration
-  - `models.json` — LLM 模型配置
   - `api_translations.json` — API 英文名→中文名映射表
   - `search-config.json` — 搜索模式控制（full / incremental）
   - `fda_nitrosamines.json` — FDA 缓存（运行时生成，不纳入版本控制）

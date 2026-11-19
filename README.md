@@ -65,9 +65,8 @@ cd skills/browser_executor/scripts && PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm i &
 # 3. 启动 Windows 侧真实 Chrome（专用 profile + CDP 端口 9223；已在运行则秒退）
 bash scripts/launch-chrome.sh
 
-# 4. 配置模型（LLM；仅交互/开发用，纯生产定时任务可跳过）
-mkdir -p ~/.pi/agent && cp config/models.json ~/.pi/agent/models.json
-export DASHSCOPE_API_KEY=sk-你的key        # 建议写入 ~/.bashrc
+# 4. 配置 LLM Key（只有管线交易场景用得到；模型名在 scenarios/preclinical/config.json）
+echo 'DASHSCOPE_API_KEY=sk-你的key' >> .env
 
 # 5. 配置企微（交付物：智能表格）
 cp .env.example .env                       # 填 WECOM_CORPID / WECOM_SECRET（+可选 WECOM_WEBHOOK_KEY）

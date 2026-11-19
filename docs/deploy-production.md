@@ -153,13 +153,7 @@ DASHSCOPE_API_KEY=sk-...      # 百炼 API Key
 grep -q "^WECOM_ENV" .env && echo "❌ 生产机不应设置 WECOM_ENV" || echo "✅ 未设置 = prod"
 ```
 
-### 3.3 模型配置（只有用 pi 交互时才需要）
-
-```bash
-mkdir -p ~/.pi/agent && cp config/models.json ~/.pi/agent/models.json
-```
-
-cron 里的脚本**不读**这份配置，只读 `.env` 的 `DASHSCOPE_API_KEY` + `scenarios/preclinical/config.json` 里的 `llm.*`。
+cron 里的脚本**不读** pi 的模型配置，只读 `.env` 的 `DASHSCOPE_API_KEY` + `scenarios/preclinical/config.json` 里的 `llm.*`。
 
 ---
 
