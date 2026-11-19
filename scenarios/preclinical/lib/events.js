@@ -8,8 +8,18 @@ const WS = path.resolve(__dirname, '..', '..', '..');
 const DIR = path.join(WS, 'output', 'history', 'preclinical');
 
 const fileOf = (y) => path.join(DIR, `events-${y}.json`);
-const load = (y) => { try { return JSON.parse(fs.readFileSync(fileOf(y), 'utf8')); } catch { return { events: {} }; } };
-const save = (y, db) => { fs.mkdirSync(DIR, { recursive: true }); fs.writeFileSync(fileOf(y), JSON.stringify(db, null, 1)); };
+const load = (y) => {
+  try { return JSON.parse(fs.readFileSync(fileOf(y), 'utf8')); } catch (e) {
+    if (e.code === 'ENOENT') return { events: {} };
+    throw new Error(`events-${y}.json 读取失败（${e.message}）——拒绝以空账本继续，否则下次写盘会覆盖掉全部历史`);
+  }
+};
+const save = (y, db) => {
+  fs.mkdirSync(DIR, { recursive: true });
+  const tmp = fileOf(y) + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(db, null, 1));
+  fs.renameSync(tmp, fileOf(y));      // rename 原子：进程被杀只会剩 .tmp，账本本体不会半截
+};
 
 const dayNum = (d) => Math.floor(Date.parse(`${d}T00:00:00Z`) / 864e5);
 // 资产代号集合：OLN324 / IBI324 / HSK47388 / RC298（不同稿子常给不同代号，如「IBI324（OLN324）」）

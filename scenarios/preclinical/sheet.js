@@ -63,7 +63,7 @@ const dosageForm = (ev) => ev.dosage_form_raw || (String(ev.asset_raw || '').mat
 
 const SCOPE_MAP = { global: '全球', ex_greater_china: '大中华区以外', greater_china: '含大中华区', regional: '区域性', unknown: '未知' };
 const RIGHTS_MAP = { retained: '保留', excluded: '已授出', unknown: '未知' };
-const TYPE_MAP = { license_out: '授权出海', license_in: '引进', financing: '融资', milestone: '里程碑', partnership: '合作', other: '合作' };
+const TYPE_MAP = { license_out: '授权出海', license_in: '引进', financing: '融资', milestone: '里程碑', partnership: '合作', cooperation: '合作', other: '合作' };
 // 顺序敏感："III期".includes("I期") 为真 → 必须先匹配 III，再 II，最后 I；IND 要在 NDA 之前（"获批临床"含"获批"）
 const PHASE_MAP = [
   [/临床前|PCC/i, '临床前'],

@@ -211,10 +211,13 @@ node scenarios/pipeline/sync.js --init
 ### 5.3 管线交易（同一文档下的子表）
 
 ```bash
-node scenarios/preclinical/sync.js --init
+node scenarios/preclinical/sync.js --bootstrap --init
 ```
 
-会新建一个子表。**企微 API 不支持重命名子表**，所以建完后：
+`--bootstrap` 复用 5.2 建好的「CSP管线商机」文档 docid，在同一文档下 `add_sheet` 并写
+`config/wecom-preclinical.<env>.json`；**不加 `--bootstrap` 会因缺 docid 直接报错**（子表必须挂在同一文档下）。
+
+**企微 API 不支持重命名子表**，所以建完后：
 
 > 在企微里双击该子表标签，改名为 **「管线交易信息」**。
 
@@ -374,18 +377,10 @@ node scenarios/pipeline/sync.js --dry-run   # 先看会不会大改表
 
 ---
 
-## 12. 安全与合规（红线）
+## 12. 安全与合规
 
-| 项 | 要求 |
-|---|---|
-| 密钥 | 只放 `.env`（gitignore）；**不得**写进代码、日志、群消息、截图 |
-| 客户数据 | 表内含企业联系人渠道信息；**不得**导出到个人设备、不得传第三方 |
-| 数据出境 | 不把库/表穿到公网；不用 Cloudflare Tunnel / 境外中继搬运医药客户数据 |
-| 第三方数据源 | **医药魔方/药智/Insights 禁止自动化访问**（协议明令禁止）；天眼查走官方 API 或不用 |
-| 采集合规 | HKEXnews 禁用（ToS 禁止程序化访问）；CDT/CNIPA 必须真浏览器，**禁止伪造指纹** |
-| 个人信息 | 表中只存"渠道类型 + 企业域名"，**不存个人姓名/电话/邮箱**（PIPL） |
-
----
+密钥只放 `.env`（gitignore），不得写进代码/日志/群消息；客户数据与联系人渠道不得导出到个人设备。
+**数据源与采集合规红线以 `AGENTS.md` 为准**（医药魔方禁爬、HKEXnews 禁用、CDT 真浏览器不伪造指纹、PIPL 只存渠道类型+域名），此处不再重述。
 
 ## 13. 版本升级流程
 

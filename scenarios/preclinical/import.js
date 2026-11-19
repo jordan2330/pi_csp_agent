@@ -23,7 +23,10 @@ const has = (f) => process.argv.includes(f);
 const files = process.argv.reduce((a, v, i, arr) => (v === '--file' ? [...a, arr[i + 1]] : a), []);
 const DRY = has('--dry-run');
 
-const TYPES = ['license_out', 'license_in', 'financing', 'milestone', 'cooperation', 'other'];
+const TYPES = ['license_out', 'license_in', 'financing', 'milestone', 'partnership', 'other'];
+// 调研侧口语可能写 cooperation/bd —— 统一到采集链的词表（extract.js SYSTEM / sheet.js TYPE_MAP），否则事件键不同源、findSame 合并不上
+const ALIAS = { cooperation: 'partnership', bd: 'license_out' };
+const typeOf = (t) => TYPES.includes(t) ? t : (ALIAS[t] || 'other');
 const PHASES = ['临床前', 'IND', 'I期', 'II期', 'III期', 'NDA/上市'];
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const USD = 7.2;          // 人民币→美元固定汇率：只用于排序/展示，原文永远保留
@@ -63,7 +66,7 @@ if (require.main === module) (async () => {
 
   for (const [i, r] of raw.entries()) {
     const miss = [];
-    const type = TYPES.includes(r.type) ? r.type : (r.type === 'bd' ? 'license_out' : 'other');
+    const type = typeOf(r.type);
     if (!r.company_cn || String(r.company_cn).trim().length < 2) miss.push('无公司名');
     if (!DATE_RE.test(String(r.event_date || ''))) miss.push('日期非 YYYY-MM-DD');
     if (!/^https?:\/\//.test(String(r.url || ''))) miss.push('无 URL');
@@ -79,6 +82,11 @@ if (require.main === module) (async () => {
       continue;
     }
 
+    const noSpace = (v) => String(v || '').replace(/[^\u4e00-\u9fffA-Za-z0-9]/g, '');
+    const body = noSpace(text);
+    const money = (raw) => (raw && !body.includes(noSpace(raw)) ? '' : raw);   // 原文找不到 → 视为编造，清掉
+    const upRaw = money(r.amount_upfront_raw), totalRaw = money(r.amount_total_raw);
+
     const ev = {
       is_event: true,
       type,
@@ -87,10 +95,10 @@ if (require.main === module) (async () => {
       counterparty_raw: r.counterparty_raw || '',
       asset_raw: r.asset_raw || '',
       phase_raw: PHASES.includes(r.phase_raw) ? r.phase_raw : '',
-      amount_upfront_raw: r.amount_upfront_raw || '',
-      amount_upfront_usd_m: toUsdM(r.amount_upfront_raw),
-      amount_total_raw: r.amount_total_raw || '',
-      amount_total_usd_m: toUsdM(r.amount_total_raw),
+      amount_upfront_raw: upRaw || '',
+      amount_upfront_usd_m: toUsdM(upRaw),
+      amount_total_raw: totalRaw || '',
+      amount_total_usd_m: toUsdM(totalRaw),
       territory_raw: r.territory_raw || '',
       territory_scope: 'unknown',          // 授权范围枚举由 LLM 判，导入侧只保留原文（宁缺勿推）
       china_rights: 'unknown',
@@ -122,7 +130,14 @@ if (require.main === module) (async () => {
 
   // 复核清单：拒绝原因 + 疑似跨月重复（同公司+资产+类型，非合并窗口内）
   const outDir = path.join(WS, 'output', 'preclinical');
+  if (DRY) { console.log('复核清单未写盘（--dry-run）'); return; }
   fs.mkdirSync(outDir, { recursive: true });
+  const retryable = rejected.filter(x => x.why.startsWith('抓取失败'));
+  if (retryable.length) {
+    const rf = path.join(outDir, `import-retry-${new Date().toISOString().slice(0, 10)}.json`);
+    fs.writeFileSync(rf, JSON.stringify(retryable.map(x => x.r), null, 1));
+    console.log(`可重试 ${retryable.length} 条（网络抖动）：node scenarios/preclinical/import.js --file ${path.relative(WS, rf)}`);
+  }
   const outFile = path.join(outDir, `import-review-${new Date().toISOString().slice(0, 10)}.md`);
   const lines = [`# 历史补录复核清单 ${new Date().toISOString().slice(0, 10)}`, '', `通过 ${accepted.length} / 拒绝 ${rejected.length}`, ''];
   if (rejected.length) {
@@ -147,4 +162,4 @@ if (require.main === module) (async () => {
   console.log(`复核清单：${path.relative(WS, outFile)}`);
 })().catch(e => { console.error('❌', e.message); process.exit(1); });
 
-module.exports = { toUsdM };
+module.exports = { toUsdM, typeOf };

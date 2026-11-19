@@ -24,9 +24,13 @@ const arg = (n, d) => { const i = process.argv.indexOf(n); return i !== -1 && pr
 
 (async () => {
   const year = new Date().getFullYear();
-  // 跨年不能只读当年：1 月 1 日新账本为空会把子表清空
-  const rows = [...Object.values(events.load(year - 1).events), ...Object.values(events.load(year).events)];
-  console.log(`账本 events-${year - 1}+${year}: ${rows.length} 条`);
+  const days = arg('--days', 400);
+  // 窗口起点年可能比 year-1 还早（1 月时 400 天伸到前年）→ 按窗口算出要载哪几年
+  const from = new Date(Date.now() - days * 864e5).getFullYear();
+  const years = [];
+  for (let y = Math.min(from, year - 1); y <= year; y++) years.push(y);
+  const rows = years.flatMap(y => Object.values(events.load(y).events));
+  console.log(`账本 ${years.join('+')}: ${rows.length} 条`);
   if (has('--bootstrap')) {
     const W = require(path.join(WS, 'scripts', 'lib', 'wecom.js'));
     if (sheet.readCfg().sheet_id) {
@@ -49,6 +53,6 @@ const arg = (n, d) => { const i = process.argv.indexOf(n); return i !== -1 && pr
     }
   }
   if (has('--init')) await sheet.initTable();
-  const r = await sheet.sync(rows, { dryRun: has('--dry-run'), windowDays: arg('--days', 400) });
+  const r = await sheet.sync(rows, { dryRun: has('--dry-run'), windowDays: days });
   console.log(JSON.stringify(r));
 })().catch(e => { console.error('❌', e.message); process.exit(1); });

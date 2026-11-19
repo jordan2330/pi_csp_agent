@@ -44,14 +44,7 @@ node scenarios/preclinical/digest.js --days 14 --send   # 强制推送（含 dev
 三个场景共用一台机器、两处会互相干扰：**Chrome（CDP 9223）** 与 **企微 token 缓存**。
 所以**必须串行**且时间错开；管线交易只用 HTTP，不受 Chrome 影响。
 
-本场景只用 HTTP，不与管线/主表抢 Chrome。完整三条 cron 见 **`docs/cron.md`**（唯一出处）。
-
-```cron
-20 8 * * 1  cd ~/agents/pi_csp_agent && node scenarios/preclinical/weekly.js >> output/cron-deals.log 2>&1
-```
-
-⚠️ cron 的 PATH 里没有 node（pi 装在 `~/.local/share/pi-node/current/bin/`），**必须**在 crontab 顶部设 `PATH`，
-否则静默失败。`pdfminer` 装在 `--user`，cron 的 HOME 正确才能 import。详见 `docs/cron.md`。
+本场景只用 HTTP，不与管线/主表抢 Chrome。**cron 的唯一出处是 `docs/cron.md`**（含 PATH、flock、上线验证），不在此重复。
 
 ## 数据源
 
