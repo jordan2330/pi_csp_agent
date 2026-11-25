@@ -144,6 +144,9 @@ const overlap = (a, b) => {
   const bad = Object.entries(store.rows).filter(([, x]) => (x.phase && !x.phase_src) || (x.phase && phaseLabel(x.phase_rank) !== x.phase));
   if (bad.length) console.error(`❌ 自检失败：${bad.length} 行期次无来源或标签不一致，例 ${bad[0][0]}`);
   else log('✅ 自检通过：有期次的行都有来源，标签与 rank 一致');
+
+  // 浏览器 CDP 连接会让事件循环保持存活：不显式退出，进程会挂到调用方的步骤超时（实测白等 30 分钟）
+  process.exit(0);
 })().catch(e => { console.error('❌', e.message); process.exit(1); });
 
 function save(store) {
