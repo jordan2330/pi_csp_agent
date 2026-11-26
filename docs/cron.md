@@ -3,37 +3,40 @@
 三个场景共用一台机器。**只有两处会互相干扰：Chrome（CDP 9223）与企微 token 缓存**，
 所以两个用浏览器的任务必须互斥（`flock`），第三个只用 HTTP，不受影响。
 
-## 完整 crontab
+## 完整 crontab（与生产机 w2zbdv04-home 当前一致）
 
 ```cron
-# cron 的 PATH 里没有 node（本机 node 由 pi 安装在 ~/.local/share/pi-node/current/bin/）
-# 这一段是必须的，否则所有任务静默失败（日志里只有 "node: command not found"）
-PATH=/home/guoj01/.local/share/pi-node/current/bin:/usr/local/bin:/usr/bin:/bin
+SHELL=/bin/bash
+# cron 不读 .profile：node 由 nvm 管，必须显式给 PATH（否则日志只有 node: command not found）
+PATH=/home/guoj01/.nvm/versions/node/v24.22.1/bin:/usr/local/bin:/usr/bin:/bin
 
 # 07:00 确保 Windows 侧 Chrome 已起（幂等：已在运行则立即返回）
-0  7 * * *   cd $HOME/agents/pi_csp_agent && bash scripts/launch-chrome.sh >> output/cron-chrome.log 2>&1
+0  7 * * *   cd /home/guoj01/agents/pi_csp_agent && bash scripts/launch-chrome.sh >> output/cron-chrome.log 2>&1
 
-# 07:10 临床阶段管线（用 Chrome）→ 子表「临床阶段管线」
-10 7 * * *   cd $HOME/agents/pi_csp_agent && flock -n /tmp/csp-chrome.lock node scenarios/pipeline/run.js >> output/cron-pipeline.log 2>&1
+# 09:10 临床阶段管线（用 Chrome；实测约 45 分钟，其中 CT.gov 期次富化 ~20 分钟静默无输出）
+10 9 * * *   cd /home/guoj01/agents/pi_csp_agent && flock -n /tmp/csp-chrome.lock node scenarios/pipeline/run.js >> output/cron-pipeline.log 2>&1
 
-# 07:40 主表 nitrosamine（用 Chrome，同一把锁 → 与上面错开 30 分钟）
-40 7 * * *   cd $HOME/agents/pi_csp_agent && flock -n /tmp/csp-chrome.lock node scripts/run-pipeline.js nitrosamine >> output/cron-main.log 2>&1
+# 周一 09:40 管线交易（纯 HTTP，不抢 Chrome）
+40 9 * * 1   cd /home/guoj01/agents/pi_csp_agent && node scenarios/preclinical/weekly.js >> output/cron-deals.log 2>&1
 
-# 周一 08:20 管线交易（纯 HTTP，不抢 Chrome）
-20 8 * * 1   cd $HOME/agents/pi_csp_agent && node scenarios/preclinical/weekly.js >> output/cron-deals.log 2>&1
+# 周一 12:00 主表 nitrosamine（用 Chrome，与 09:10 共用同一把锁）
+0 12 * * 1   cd /home/guoj01/agents/pi_csp_agent && flock -w 7200 /tmp/csp-chrome.lock node scripts/run-pipeline.js nitrosamine >> output/runs/cron.log 2>&1
 ```
 
 ## 为什么这么排
 
 | 设计 | 原因 |
 |---|---|
-| `PATH` 写死在顶部 | cron 不读 `.profile`，找不到 pi 安装的 node |
+| `PATH` 写死在顶部 | cron 不读 `.profile`，找不到 nvm 装的 node |
 | `launch-chrome.sh` 单独一行在 07:00 | 它幂等（已在运行就返回）；比每个任务里都写一遍干净 |
-| 两个 Chrome 任务同一把 `flock` | 抢不到锁就跳过本轮，避免标签页互相踩；比单纯错开时间更可靠（某次跑超时不会连累下一轮） |
-| `flock -n`（非阻塞） | 宁可跳过一轮，也不要排队堆叠 |
-| 主表放最后 | 它最重（FDA + CT.gov + CDT + 富化），前面两个轻的先跑完 |
+| 两个 Chrome 任务同一把 `flock` | `browser.js` 每次 `newPage()`，并发时标签页不互踩，但共用同一 profile 的 Cookie 与 CDT 节流配置，会互相拖慢/触发风控 |
+| 管线用 `flock -n`，主表用 `flock -w 7200` | **日频可以跳过，周频不能**：管线拖长时主表宁可等 2 小时也要跑；反过来若主表先起，管线当天跳过无损失 |
+| 主表放最后（12:00） | 它最重（FDA + CT.gov + CDT + 富化），且周频，晚一点不影响 |
 | 管线交易放周一 | 公众号 RSS 每号只给最近 20 条，日频抓不到增量、月频会漏 |
 | 日志分四个文件 | 出问题一眼知道是哪个场景 |
+
+⚠️ **手动跑不持锁**：`node scenarios/pipeline/run.js` 直接跑会绕过 flock。
+手动与 cron 可能撞上时，自己套一层：`flock -w 3600 /tmp/csp-chrome.lock node scenarios/pipeline/run.js`。
 
 ## 上线前必须验的四件事
 
